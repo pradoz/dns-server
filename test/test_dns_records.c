@@ -31,7 +31,7 @@ static MunitResult test_rrset_add(const MunitParameter params[], void *data) {
 
   // adding wrong record type should fail
   dns_rr_t *rr_aaaa = dns_rr_create(DNS_TYPE_AAAA, DNS_CLASS_IN, 300);
-  rr_aaaa->rdata.a.address = 0x01111111;
+  rr_aaaa->rdata.a.address = 0x01010101;
   munit_assert_false(dns_rrset_add(rrset, rr_aaaa));
   munit_assert_int(rrset->count, ==, 0);
 
@@ -47,7 +47,7 @@ static MunitResult test_rrset_add(const MunitParameter params[], void *data) {
 
   // adding record with different TTL should fail
   dns_rr_t *rr_ttl_wrong = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 900);
-  rr_ttl_wrong->rdata.a.address = 0x02222222;
+  rr_ttl_wrong->rdata.a.address = 0x02020202;
   munit_assert_false(dns_rrset_add(rrset, rr_ttl_wrong));
   munit_assert_int(rrset->count, ==, 2);
 

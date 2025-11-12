@@ -11,6 +11,10 @@ build:
 	@cd $(BUILD_DIR) && cmake .. && $(MAKE)
 
 define run_ctest
+	@./$(BUILD_DIR)/$(addprefix test_,$(subst -,_,$(1)))
+endef
+
+define run_ctest_verbose
 	@cd $(BUILD_DIR) && ctest -R $(subst -,_,$(1)) $(2)
 endef
 
@@ -18,7 +22,7 @@ test-%: build
 	$(call run_ctest,$*,--output-on-failure)
 
 test-%-verbose: build
-	$(call run_ctest,$*,-V)
+	$(call run_ctest_verbose,$*,-V)
 
 test: build $(addprefix test-,$(subst test_,,$(TESTS)))
 

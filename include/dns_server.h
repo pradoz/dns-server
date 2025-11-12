@@ -2,4 +2,7 @@
 #define DNS_SERVER_H
 
 
+void bar(void);
+
+
 #endif // DNS_SERVER_H

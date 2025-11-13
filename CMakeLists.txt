@@ -7,10 +7,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic")
 include_directories(include)
 
 set(SOURCES
-    src/dns_trie.c
-    src/dns_records.c
-    src/dns_parser.c
-    src/dns_server.c
+  src/dns_trie.c
+  src/dns_records.c
+  src/dns_parser.c
+  src/dns_server.c
 )
 
 # main executable
@@ -19,14 +19,24 @@ target_link_libraries(dns_server pthread)
 
 enable_testing()
 
-# test library
+# test library (without server code)
 set(LIB_SOURCES
-    src/dns_trie.c
-    src/dns_records.c
-    src/dns_parser.c
+  src/dns_trie.c
+  src/dns_records.c
+  src/dns_parser.c
 )
 
 add_library(dns_lib STATIC ${LIB_SOURCES})
+
+# test library with server code (includes dns_server.c)
+set(LIB_SERVER_SOURCES
+  src/dns_trie.c
+  src/dns_records.c
+  src/dns_parser.c
+  src/dns_server.c
+)
+add_library(dns_server_lib STATIC ${LIB_SERVER_SOURCES})
+target_compile_definitions(dns_server_lib PRIVATE TESTING)
 
 # test executables
 add_executable(test_dns_trie test/test_dns_trie.c test/munit/munit.c)
@@ -52,3 +62,11 @@ target_include_directories(test_dns_parser PRIVATE
   ${CMAKE_SOURCE_DIR}/test/munit
 )
 add_test(NAME test_dns_parser COMMAND test_dns_parser)
+
+add_executable(test_dns_server test/test_dns_server.c test/munit/munit.c)
+target_link_libraries(test_dns_server dns_server_lib)
+target_include_directories(test_dns_server PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  ${CMAKE_SOURCE_DIR}/test/munit
+)
+add_test(NAME test_dns_server COMMAND test_dns_server)

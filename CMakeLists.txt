@@ -11,6 +11,7 @@ set(SOURCES
   src/dns_records.c
   src/dns_parser.c
   src/dns_server.c
+  src/dns_error.c
 )
 
 # main executable
@@ -34,6 +35,7 @@ set(LIB_SERVER_SOURCES
   src/dns_records.c
   src/dns_parser.c
   src/dns_server.c
+  src/dns_error.c
 )
 add_library(dns_server_lib STATIC ${LIB_SERVER_SOURCES})
 target_compile_definitions(dns_server_lib PRIVATE TESTING)

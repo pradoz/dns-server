@@ -18,19 +18,19 @@ void dns_message_free(dns_message_t *msg) {
 
   if (msg->answers) {
     for (int i = 0; i < msg->header.ancount; ++i) {
-      dns_rr_free(&msg->answers[i]);
+      dns_rr_free(msg->answers[i]);
     }
     free(msg->answers);
   }
   if (msg->authority) {
     for (int i = 0; i < msg->header.nscount; ++i) {
-      dns_rr_free(&msg->authority[i]);
+      dns_rr_free(msg->authority[i]);
     }
     free(msg->authority);
   }
   if (msg->additional) {
     for (int i = 0; i < msg->header.arcount; ++i) {
-      dns_rr_free(&msg->additional[i]);
+      dns_rr_free(msg->additional[i]);
     }
     free(msg->additional);
   }

@@ -55,9 +55,9 @@ typedef struct {
 typedef struct {
     dns_header_t header;
     dns_question_t *questions;
-    dns_rr_t *answers;
-    dns_rr_t *authority;
-    dns_rr_t *additional;
+    dns_rr_t **answers;
+    dns_rr_t **authority;
+    dns_rr_t **additional;
 } dns_message_t;
 
 

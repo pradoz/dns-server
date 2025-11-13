@@ -4,6 +4,8 @@
 
 #include "dns_trie.h"
 #include "dns_parser.h"
+#include "dns_error.h"
+#include "dns_resolver.h"
 #include <arpa/inet.h>
 
 
@@ -17,6 +19,12 @@ typedef struct {
   uint16_t port;
   dns_trie_t *trie;
   bool running;
+
+  // stats
+  uint64_t queries_received;
+  uint64_t queries_processed;
+  uint64_t queries_failed;
+  uint64_t responses_sent;
 } dns_server_t;
 
 typedef struct {
@@ -43,10 +51,14 @@ int dns_server_run(dns_server_t *server);
 // request/response handling
 dns_response_t *dns_response_create(size_t capacity);
 void dns_response_free(dns_response_t *response);
-int dns_process_query(dns_server_t *server, const dns_request_t *request, dns_response_t *response);
+int dns_process_query(dns_server_t *server, const dns_request_t *request,
+                      dns_response_t *response, dns_error_t *err);
 
-// query resolution
-int dns_resolve_query(dns_trie_t *trie, const dns_question_t *question, dns_message_t *response_msg);
+// helper to build response from resolution result
+int dns_build_response(const dns_message_t *query,
+                       const dns_resolution_result_t *resolution,
+                       uint8_t *buffer, size_t capacity, size_t *length,
+                       dns_error_t *err);
 
 
 #endif // DNS_SERVER_H

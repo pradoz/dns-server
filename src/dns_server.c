@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdio.h>
 
+
 dns_server_t *dns_server_create(uint16_t port) {
   dns_server_t *server = calloc(1, sizeof(dns_server_t));
   if (!server) return NULL;
@@ -15,11 +16,30 @@ dns_server_t *dns_server_create(uint16_t port) {
   server->port = port;
   server->socket_fd = -1;
   server->running = false;
+  server->enable_recursion = false;
 
   server->trie = dns_trie_create();
   if (!server->trie) {
     free(server);
     return NULL;
+  }
+
+  // create and initialize recursive resolver
+  server->recursive_resolver = dns_recursive_create();
+  if (!server->recursive_resolver) {
+    dns_trie_free(server->trie);
+    free(server);
+    return NULL;
+  }
+
+  if (dns_recursive_init_socket(server->recursive_resolver) < 0) {
+    printf("WARNING: Failed to initialize recursive resolver socket\n");
+    server->enable_recursion = false; // continue without recursion
+  }
+
+  if (dns_recursive_load_root_hints(server->recursive_resolver) < 0) {
+    printf("WARNING: Failed to load root hints\n");
+    server->enable_recursion = false; // continue without recursion
   }
 
   return server;
@@ -31,6 +51,7 @@ void dns_server_free(dns_server_t *server) {
   if (server->socket_fd >= 0) close(server->socket_fd);
 
   dns_trie_free(server->trie);
+  dns_recursive_free(server->recursive_resolver);  // Add this
   free(server);
 }
 
@@ -316,12 +337,60 @@ int dns_process_query(dns_server_t *server,
   dns_error_t resolve_err;
   dns_error_init(&resolve_err);
 
-  if (dns_resolve_query_full(server->trie, &query_msg->questions[0], resolution, &resolve_err) < 0) {
+  bool try_recursion = false;
+  int auth_result = dns_resolve_query_full(server->trie,
+                                           &query_msg->questions[0],
+                                           resolution,
+                                           &resolve_err);
+
+  if (auth_result < 0
+      || (resolution->rcode == DNS_RCODE_NXDOMAIN && !resolution->authoritative)
+      || (resolution->answer_count == 0 && !resolution->authoritative)) {
+    // client requested recursion
+    try_recursion = server->enable_recursion && query_msg->header.rd;
+  }
+
+  if (try_recursion) {
+    printf("No authoritative answer found, trying recursion for %s\n",
+            query_msg->questions[0].qname);
+
+    // start asynchronous recursive resolution
+    struct sockaddr_storage client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+
+    // TODO: track the client and respond asynchronously
+
+    dns_header_t error_header = query_msg->header;
+    error_header.qr = DNS_QR_RESPONSE;
+    error_header.rcode = DNS_RCODE_SERVFAIL; // temporary, see above TODO
+    error_header.ancount = 0;
+    error_header.nscount = 0;
+    error_header.ascount = 0;
+
+    dns_encode_header(response->buffer, response->capacity, &error_header);
+    offset = 12;
+    dns_encode_question(response->buffer, response->capacity, &offset, query_msg->questions);
+    response->length = offset;
+
+    dns_message_free(query_msg);
+    dns_resolution_result_free(resolution);
+    server->queries_processed++;
+
+    printf("Recursive resolution not fully implemented yet - returning SERVFAIL\n");
+    return 0;
+
+  }
+  // use authoritative result
+  server->authoritative_responses++;
+
+  if (auth_result < 0) {
     // resolution failed, but we still send a response
     if (resolve_err.code != DNS_ERR_NONE) {
       resolution->rcode = dns_error_to_rcode(resolve_err.code);
       fprintf(stderr, "Resolution error: %s (%s:%d)\n",
-          resolve_err.message, resolve_err.file, resolve_err.line);
+              resolve_err.message,
+              resolve_err.file,
+              resolve_err.line);
     } else {
       resolution->rcode = DNS_RCODE_SERVFAIL;
     }
@@ -361,6 +430,23 @@ int dns_process_query(dns_server_t *server,
   server->queries_processed++;
 
   return 0;
+}
+
+int dns_server_handle_recursive_query(dns_server_t *server,
+                                     const dns_question_t *question,
+                                     const struct sockaddr_storage *client_addr,
+                                     socklen_t client_addr_len,
+                                     uint16_t query_id) {
+  if (!server || !server->recursive_resolver || !question || !client_addr) {
+    return -1;
+  }
+
+  printf("Starting recusive resolution for %s\n", question->qname);
+  return dns_recursive_resolve(server->recursive_resolver,
+                               question->qname,
+                               client_addr,
+                               client_addr_len,
+                               query_id);
 }
 
 int dns_server_run(dns_server_t *server) {

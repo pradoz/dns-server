@@ -6,6 +6,8 @@
 #include "dns_parser.h"
 #include "dns_error.h"
 #include "dns_resolver.h"
+#include "dns_recursive.h"
+#include "dns_resolver.h"
 #include <arpa/inet.h>
 
 
@@ -18,13 +20,17 @@ typedef struct {
   int socket_fd;
   uint16_t port;
   dns_trie_t *trie;
+  dns_recursive_resolver_t *recursive_resolver;
   bool running;
+  bool enable_recursion;
 
   // stats
   uint64_t queries_received;
   uint64_t queries_processed;
   uint64_t queries_failed;
   uint64_t responses_sent;
+  uint64_t authoritative_responses;
+  uint64_t recursive_responses;
 } dns_server_t;
 
 typedef struct {
@@ -53,6 +59,11 @@ dns_response_t *dns_response_create(size_t capacity);
 void dns_response_free(dns_response_t *response);
 int dns_process_query(dns_server_t *server, const dns_request_t *request,
                       dns_response_t *response, dns_error_t *err);
+int dns_server_handle_recursive_query(dns_server_t *server,
+                                      const dns_question_t *question,
+                                      const struct sockaddr_storage *client_addr,
+                                      socklen_t client_addr_len,
+                                      uint16_t query_id);
 
 // helper to build response from resolution result
 int dns_build_response(const dns_message_t *query,

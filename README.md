@@ -4,7 +4,6 @@
 
 A simple DNS Server implemented in C.
 
-
 ## Building
 
 ```bash
@@ -49,3 +48,6 @@ mail.example.com.    300    IN    CNAME    example.com.
 ```bash
 make clean
 ```
+
+## Notes
+* Zone file format follows [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035)

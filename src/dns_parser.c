@@ -292,6 +292,34 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
       break;
     }
 
+    case DNS_TYPE_SOA: {
+      // SOA record format:
+      // MNAME (domain name)
+      // RNAME (domain name)
+      // SERIAL (4 bytes)
+      // REFRESH (4 bytes)
+      // RETRY (4 bytes)
+      // EXPIRE (4 bytes)
+      // MINIMUM (4 bytes)
+
+      if (dns_encode_name(buffer, len, offset, rr->rdata.soa.mname) < 0) return -1;
+      if (dns_encode_name(buffer, len, offset, rr->rdata.soa.rname) < 0) return -1;
+      if (*offset + 20 > len) return -1; // 5 * 4 bytes for the numbers
+
+      uint32_t serial = htonl(rr->rdata.soa.serial);
+      uint32_t refresh = htonl(rr->rdata.soa.refresh);
+      uint32_t retry = htonl(rr->rdata.soa.retry);
+      uint32_t expire = htonl(rr->rdata.soa.expire);
+      uint32_t minimum = htonl(rr->rdata.soa.minimum);
+
+      memcpy(buffer + *offset, &serial, 4);   *offset += 4;
+      memcpy(buffer + *offset, &refresh, 4);  *offset += 4;
+      memcpy(buffer + *offset, &retry, 4);    *offset += 4;
+      memcpy(buffer + *offset, &expire, 4);   *offset += 4;
+      memcpy(buffer + *offset, &minimum, 4);  *offset += 4;
+      break;
+    }
+
     case DNS_TYPE_AAAA:
       if (*offset + 16 > len) return -1;
       memcpy(buffer + *offset, &rr->rdata.aaaa.address, 16);

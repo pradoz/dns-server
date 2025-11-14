@@ -1,12 +1,115 @@
 #include "dns_server.h"
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
+
+
+dns_server_config_t *dns_server_config_create(void) {
+  dns_server_config_t *config = calloc(1, sizeof(dns_server_config_t));
+  if (!config) return NULL;
+
+  // set defaults
+  config->port = DNS_DEFAULT_PORT;
+  config->enable_recursion = true;
+  strcpy(config->root_hints_file, "root.hints");
+  strcpy(config->zone_file, "");
+  config->recursion_timeout = DNS_RECURSIVE_TIMEOUT_SEC;
+  config->max_recursion_depth = DNS_MAX_RECURSION_DEPTH;
+  config->upstream_count = 0;
+
+  return config;
+}
+
+void dns_server_config_free(dns_server_config_t *config) {
+  if (config) free(config);
+}
+
+int dns_server_config_load(dns_server_config_t *config, const char *config_file) {
+  if (!config) return -1;
+
+  FILE *file = fopen(config_file, "r");
+  if (!file) {
+    printf("Config file not found, using defaults\n");
+    return 0;
+  }
+
+  char line[512];
+  while (fgets(line, sizeof(line), file)) {
+    // skip comments/empty lines
+    if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') continue;
+
+    char key[64];
+    char value[256];
+    if (sscanf(line, "%s %s", key, value) == 2) {
+      if (strcmp(key, "port") == 0) {
+        config->port = (uint16_t) atoi(value);
+      } else if (strcmp(key, "recursion") == 0) {
+        config->enable_recursion = (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0);
+      } else if (strcmp(key, "root_hints") == 0) {
+        strncpy(config->root_hints_file, value, sizeof(config->root_hints_file) - 1);
+      } else if (strcmp(key, "zone_file") == 0) {
+        strncpy(config->zone_file, value, sizeof(config->zone_file) - 1);
+      } else if (strcmp(key, "forwarder") == 0 && config->upstream_count < 8) {
+        strncpy(config->upstream_servers[config->upstream_count], value, 63);
+        config->upstream_count++;
+      }
+    }
+  }
+
+  fclose(file);
+  printf("Loaded configuration file from %s\n", config_file);
+  return 0;
+}
+
+dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
+  if (!config) return dns_server_create(DNS_DEFAULT_PORT);
+
+  dns_server_t *server = calloc(1, sizeof(dns_server_t));
+  if (!server) return NULL;
+
+  server->socket_fd = -1;
+  server->running = false;
+  server->port = config->port;
+  server->enable_recursion = config->enable_recursion;
+
+  server->trie = dns_trie_create();
+  if (!server->trie) {
+    free(server->trie);
+    return NULL;
+  }
+
+  // create recursive resolver
+  if (config->enable_recursion) {
+    server->recursive_resolver = dns_recursive_create();
+    if (server->recursive_resolver) {
+      if (dns_recursive_init_socket(server->recursive_resolver) < 0) {
+        printf("WARNING: Failed to initialize recursive resolver socket\n");
+        server->enable_recursion = false;
+      }
+
+      // try to load root hints
+      if (dns_recursive_load_root_hints_file(server->recursive_resolver,
+                                             config->root_hints_file) < 0) {
+        printf("WARNING: Failed to load root hints, using built-in\n");
+        dns_recursive_load_root_hints(server->recursive_resolver);
+      }
+
+      // add upstream forwarders if configured
+      if (config->upstream_count > 0) {
+        printf("Configuring %d upstream forwarders\n", config->upstream_count);
+        // TODO: implement forwarder mode
+      }
+    }
+  }
+
+  return server;
+}
 
 dns_server_t *dns_server_create(uint16_t port) {
   dns_server_t *server = calloc(1, sizeof(dns_server_t));
@@ -15,11 +118,34 @@ dns_server_t *dns_server_create(uint16_t port) {
   server->port = port;
   server->socket_fd = -1;
   server->running = false;
+  server->enable_recursion = false;
 
   server->trie = dns_trie_create();
   if (!server->trie) {
     free(server);
     return NULL;
+  }
+
+  // create and initialize recursive resolver
+  server->recursive_resolver = dns_recursive_create();
+  if (!server->recursive_resolver) {
+    dns_trie_free(server->trie);
+    free(server);
+    return NULL;
+  }
+
+  if (dns_recursive_init_socket(server->recursive_resolver) < 0) {
+    printf("WARNING: Failed to initialize recursive resolver socket\n");
+    server->enable_recursion = false;
+  } else {
+    // socket initialized successfully
+    server->enable_recursion = true;
+
+    // try to load root hints, disable recursion if we fail
+    if (dns_recursive_load_root_hints(server->recursive_resolver) < 0) {
+      printf("WARNING: Failed to load root hints\n");
+      server->enable_recursion = false;
+    }
   }
 
   return server;
@@ -31,6 +157,7 @@ void dns_server_free(dns_server_t *server) {
   if (server->socket_fd >= 0) close(server->socket_fd);
 
   dns_trie_free(server->trie);
+  dns_recursive_free(server->recursive_resolver);  // Add this
   free(server);
 }
 
@@ -304,7 +431,7 @@ int dns_process_query(dns_server_t *server,
     return 0;
   }
 
-  // resolve query
+  // resolve query - try authoritative first
   dns_resolution_result_t *resolution = dns_resolution_result_create();
   if (!resolution) {
     DNS_ERROR_SET(err, DNS_ERR_MEMORY_ALLOCATION, "Failed to allocate resolution result");
@@ -316,12 +443,59 @@ int dns_process_query(dns_server_t *server,
   dns_error_t resolve_err;
   dns_error_init(&resolve_err);
 
-  if (dns_resolve_query_full(server->trie, &query_msg->questions[0], resolution, &resolve_err) < 0) {
+  int auth_result = dns_resolve_query_full(server->trie,
+                                           &query_msg->questions[0],
+                                           resolution,
+                                           &resolve_err);
+
+  // check if client requested recursion
+  bool try_recursion = false;
+  if (server->enable_recursion && query_msg->header.rd) {
+    if (auth_result < 0
+        || (resolution->rcode == DNS_RCODE_NXDOMAIN && !resolution->authoritative)
+        || (resolution->answer_count == 0 && !resolution->authoritative)) {
+      // client requested recursion
+      try_recursion = true;
+    }
+  }
+
+  if (try_recursion) {
+    printf("Starting recursilve resolution for %s (type %u)\n",
+            query_msg->questions[0].qname,
+            query_msg->questions[0].qtype);
+
+    // start asynchronous recursive resolution
+    int recursive_result = dns_recursive_resolve(server->recursive_resolver,
+                                                 &query_msg->questions[0],
+                                                 &request->client_addr,
+                                                 request->client_addr_len,
+                                                 query_msg->header.id);
+    if (recursive_result == 0) {
+      // start async resolution, response will be sent when it completes
+      dns_message_free(query_msg);
+      dns_resolution_result_free(resolution);
+      server->queries_processed++;
+      server->recursive_responses++;
+
+      // don't send the response now, just mark it as empty
+      response->length = 0;
+      return 0;
+    } else {
+      printf("Failed to start recursive resolution, falling back to authoritative\n");
+    }
+  }
+
+  // recursive resolution failed to start, fall back to authoritative
+  server->authoritative_responses++;
+
+  if (auth_result < 0) {
     // resolution failed, but we still send a response
     if (resolve_err.code != DNS_ERR_NONE) {
       resolution->rcode = dns_error_to_rcode(resolve_err.code);
       fprintf(stderr, "Resolution error: %s (%s:%d)\n",
-          resolve_err.message, resolve_err.file, resolve_err.line);
+              resolve_err.message,
+              resolve_err.file,
+              resolve_err.line);
     } else {
       resolution->rcode = DNS_RCODE_SERVFAIL;
     }
@@ -337,6 +511,7 @@ int dns_process_query(dns_server_t *server,
                          response->capacity,
                          &response->length,
                          &build_err) < 0) {
+
     // failed to build response, send SERVFAIL
     dns_header_t error_header = query_msg->header;
     error_header.qr = DNS_QR_RESPONSE;
@@ -363,65 +538,155 @@ int dns_process_query(dns_server_t *server,
   return 0;
 }
 
+int dns_server_handle_recursive_query(dns_server_t *server,
+                                     const dns_question_t *question,
+                                     const struct sockaddr_storage *client_addr,
+                                     socklen_t client_addr_len,
+                                     uint16_t query_id) {
+  if (!server || !server->recursive_resolver || !question || !client_addr) {
+    return -1;
+  }
+
+  printf("Starting recusive resolution for %s\n", question->qname);
+  return dns_recursive_resolve(server->recursive_resolver,
+                               question,
+                               client_addr,
+                               client_addr_len,
+                               query_id);
+}
+
+int dns_recursive_cleanup_expired_queries(dns_recursive_resolver_t *resolver) {
+  if (!resolver) return -1;
+
+  time_t now = time(NULL);
+  int cleaned = 0;
+
+  for (int i = 0; i < 256; ++i) {
+    dns_recursive_query_t *query = &resolver->active_queries[i];
+
+    if (query->query_id != 0
+        && (now - query->start_time) > DNS_RECURSIVE_TIMEOUT_SEC) {
+
+      printf("Cleaning up expired query for %s (ID: %u)\n",
+             query->qname,
+             query->query_id);
+
+      // send timeout response to client
+      dns_recursive_send_error_response(resolver, query, DNS_RCODE_SERVFAIL);
+
+      // mark as inactive
+      query->query_id = 0;
+      resolver->failed_queries++;
+      ++cleaned;
+    }
+  }
+
+  return cleaned;
+}
+
 int dns_server_run(dns_server_t *server) {
   if (!server || server->socket_fd < 0) return -1;
 
   uint8_t recv_buffer[DNS_BUFFER_SIZE];
 
+  // set up socket for main server to reference recursive resolver
+  if (server->recursive_resolver) {
+    dns_recursive_set_main_socket(server->recursive_resolver, server->socket_fd);
+  }
+
   while (server->running) {
-    dns_request_t request = {0};
-    request.client_addr_len = sizeof(request.client_addr);
+    fd_set read_fds;
+    int max_fd = server->socket_fd;
 
-    // receive query
-    ssize_t recv_len = recvfrom(server->socket_fd,
-                                recv_buffer,
-                                sizeof(recv_buffer),
-                                0,
-                                (struct sockaddr *)&request.client_addr,
-                                &request.client_addr_len);
+    FD_ZERO(&read_fds);
+    FD_SET(server->socket_fd, &read_fds);
 
-    if (recv_len < 0) {
+    // add recursive resolver socket if it's available
+    if (server->recursive_resolver && server->recursive_resolver->socket_fd >= 0) {
+      FD_SET(server->recursive_resolver->socket_fd, &read_fds);
+      if (server->recursive_resolver->socket_fd > max_fd) {
+        max_fd = server->recursive_resolver->socket_fd;
+      }
+    }
+
+    // wait for activity on either socket
+    struct timeval timeout = {1, 0}; // 1s timeout
+    int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+
+    if (activity < 0) {
       if (errno == EINTR) continue;
-      perror("recvfrom failed");
+      perror("select failed");
+      break;
+    }
+
+    if (activity == 0) {
+      // timeout, check for expired recursive queries
+      dns_recursive_cleanup_expired_queries(server->recursive_resolver);
       continue;
     }
 
-    // too small to be valid DNS packet
-    if (recv_len < 12) continue;
+    // check for client queries on main socket
+    if (FD_ISSET(server->socket_fd, &read_fds)) {
+      dns_request_t request = {0};
+      request.client_addr_len = sizeof(request.client_addr);
 
-    request.buffer = recv_buffer;
-    request.length = recv_len;
+      // receive query
+      ssize_t recv_len = recvfrom(server->socket_fd,
+                                  recv_buffer,
+                                  sizeof(recv_buffer),
+                                  0,
+                                  (struct sockaddr *)&request.client_addr,
+                                  &request.client_addr_len);
 
-    // process query
-    dns_response_t *response = dns_response_create(DNS_BUFFER_SIZE);
-    if (!response) continue;
+      if (recv_len >= 12) {
+        request.buffer = recv_buffer;
+        request.length = recv_len;
 
-    dns_error_t err;
-    dns_error_init(&err);
+        dns_response_t *response = dns_response_create(DNS_BUFFER_SIZE);
+        if (response) {
 
-    if (dns_process_query(server, &request, response, &err) == 0
-        && response->length > 0) {
-      // send response
-      ssize_t sent = sendto(server->socket_fd,
-                            response->buffer,
-                            response->length,
-                            0,
-                            (struct sockaddr *)&request.client_addr,
-                            request.client_addr_len);
+          dns_error_t err;
+          dns_error_init(&err);
 
-      if (sent < 0) {
-        perror("sendto failed");
-      } else {
-        server->responses_sent++;
+          if (dns_process_query(server, &request, response, &err) == 0
+              && response->length > 0) {
+            // send response
+            ssize_t sent = sendto(server->socket_fd,
+                                  response->buffer,
+                                  response->length,
+                                  0,
+                                  (struct sockaddr *)&request.client_addr,
+                                  request.client_addr_len);
+            if (sent > 0) {
+              server->responses_sent++;
+            }
+          }
+
+          dns_response_free(response);
+        }
       }
-    } else if (err.code != DNS_ERR_NONE) {
-      fprintf(stderr, "Query processing error: %s (%s:%d)\n",
-              err.message,
-              err.file,
-              err.line);
     }
 
-    dns_response_free(response);
+    // check for recursive resolver responses
+    if (server->recursive_resolver
+        && server->recursive_resolver->socket_fd >= 0
+        && FD_ISSET(server->recursive_resolver->socket_fd, &read_fds)) {
+      struct sockaddr_storage server_addr;
+      socklen_t server_addr_len = sizeof(server_addr);
+
+      ssize_t recv_len = recvfrom(server->recursive_resolver->socket_fd,
+                                  recv_buffer,
+                                  sizeof(recv_buffer),
+                                  0,
+                                  (struct sockaddr*) &server_addr,
+                                  &server_addr_len);
+      if (recv_len >= 12) {
+        dns_recursive_handle_response(server->recursive_resolver,
+                                      recv_buffer,
+                                      recv_len,
+                                      &server_addr);
+      }
+    }
   }
 
   return 0;

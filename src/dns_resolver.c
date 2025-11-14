@@ -121,7 +121,13 @@ int dns_resolve_query_full(dns_trie_t *trie,
 
   // check if domain exists with a different record type (NODATA)
   dns_rrset_t *any_rrset = NULL;
-  dns_record_type_t check_types[] = {DNS_TYPE_A, DNS_TYPE_AAAA, DNS_TYPE_NS, DNS_TYPE_MX};
+  dns_record_type_t check_types[] = {
+    DNS_TYPE_A,
+    DNS_TYPE_AAAA,
+    DNS_TYPE_CNAME,
+    DNS_TYPE_NS,
+    DNS_TYPE_MX,
+  };
   for (size_t i = 0; i < sizeof(check_types) / sizeof(check_types[0]); ++i) {
     if (check_types[i] != question->qtype) {
       any_rrset = dns_trie_lookup(trie, question->qname, check_types[i]);
@@ -240,10 +246,15 @@ int dns_add_authority_soa(dns_trie_t *trie,
   if (!soa_rr) return -1;
 
   memcpy(&soa_rr->rdata.soa, zone->soa, sizeof(dns_soa_t));
-  dns_rr_list_append(&result->authority_list, &result->authority_count, soa_rr);
+  strncpy(result->authority_zone_name, zone->zone_name, MAX_DOMAIN_NAME - 1);
 
-  if (zone->authoritative) result->authoritative = true;
+  // add SOA to authority list
+  if (dns_rr_list_append(&result->authority_list, &result->authority_count, soa_rr)) {
+    if (zone->authoritative) result->authoritative = true;
+    return 0;
+  }
 
-  return 0;
+  dns_rr_free(soa_rr);
+  return -1;
 }
 

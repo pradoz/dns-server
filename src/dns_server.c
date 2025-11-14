@@ -160,10 +160,13 @@ int dns_build_response(const dns_message_t *query,
   // encode authority section (if not truncated)
   if (!response_header.tc) {
     for (dns_rr_t *rr = resolution->authority_list; rr != NULL; rr = rr->next) {
+      const char *name;
       // for SOA records in authority, use the zone name from the SOA
-      const char *name = (rr->type == DNS_TYPE_SOA)
-        ? rr->rdata.soa.mname
-        : query->questions[0].qname;
+      if (rr->type == DNS_TYPE_SOA && resolution->authority_zone_name[0] != '\0') {
+        name = resolution->authority_zone_name;
+      } else {
+        name = query->questions[0].qname;
+      }
 
       if (dns_encode_rr(buffer, capacity, &offset, name, rr) < 0) {
         // truncate if authority section doesn't fit
@@ -173,6 +176,7 @@ int dns_build_response(const dns_message_t *query,
 
         offset = 12;
         dns_encode_header(buffer, capacity, &response_header);
+
         // would need to re-encode everything, so just stop here
         break;
       }

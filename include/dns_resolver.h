@@ -25,6 +25,7 @@ typedef struct {
   int additional_count;
   uint8_t rcode;
   bool authoritative;
+  char authority_zone_name[MAX_DOMAIN_NAME];
 } dns_resolution_result_t;
 
 

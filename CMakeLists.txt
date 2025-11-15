@@ -14,6 +14,7 @@ set(LIB_SOURCES
   src/dns_error.c
   src/dns_resolver.c
   src/dns_server.c
+  src/dns_zone_file.c
 )
 
 # main executable sources
@@ -70,3 +71,11 @@ target_include_directories(test_dns_server PRIVATE
   ${CMAKE_SOURCE_DIR}/test/munit
 )
 add_test(NAME test_dns_server COMMAND test_dns_server)
+
+add_executable(test_dns_zone_file test/test_dns_zone_file.c test/munit/munit.c)
+target_link_libraries(test_dns_zone_file dns_lib)
+target_include_directories(test_dns_zone_file PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  ${CMAKE_SOURCE_DIR}/test/munit
+)
+add_test(NAME test_dns_zone_file COMMAND test_dns_zone_file)

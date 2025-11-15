@@ -1,6 +1,6 @@
 BUILD_DIR = build
 
-TESTS = test_dns_trie test_dns_records test_dns_parser test_dns_resolver test_dns_server
+TESTS = test_dns_trie test_dns_records test_dns_parser test_dns_resolver test_dns_server test_dns_zone_file
 
 .PHONY: all build test test-verbose example clean run
 
@@ -33,5 +33,3 @@ run: build
 
 clean:
 	@rm -rf $(BUILD_DIR)
-	@rm -rf test/CMakeFiles test/cmake_install.cmake test/CTestTestfile.cmake test/Makefile
-

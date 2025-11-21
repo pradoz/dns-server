@@ -356,7 +356,7 @@ int dns_process_query(dns_server_t *server,
 
     // start asynchronous recursive resolution
     struct sockaddr_storage client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
+    // socklen_t client_addr_len = sizeof(client_addr);
 
     // TODO: track the client and respond asynchronously
 
@@ -365,7 +365,7 @@ int dns_process_query(dns_server_t *server,
     error_header.rcode = DNS_RCODE_SERVFAIL; // temporary, see above TODO
     error_header.ancount = 0;
     error_header.nscount = 0;
-    error_header.ascount = 0;
+    error_header.arcount = 0;
 
     dns_encode_header(response->buffer, response->capacity, &error_header);
     offset = 12;
@@ -443,7 +443,7 @@ int dns_server_handle_recursive_query(dns_server_t *server,
 
   printf("Starting recusive resolution for %s\n", question->qname);
   return dns_recursive_resolve(server->recursive_resolver,
-                               question->qname,
+                               question,
                                client_addr,
                                client_addr_len,
                                query_id);

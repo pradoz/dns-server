@@ -1,4 +1,5 @@
 #include "munit.h"
+#include "dns_server.h"
 #include "dns_recursive.h"
 #include <string.h>
 #include <arpa/inet.h>

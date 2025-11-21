@@ -34,7 +34,7 @@ dns_recursive_resolver_t *dns_recursive_create(void) {
   resolver->next_query_id = 1;
 
   // query tracking
-  for (in i = 0; i < 256; ++i) {
+  for (int i = 0; i < 256; ++i) {
     resolver->active_queries[i].query_id = 0; // inactive
   }
 
@@ -63,7 +63,7 @@ int dns_recursive_init_socket(dns_recursive_resolver_t *resolver) {
 
   if (setsockopt(resolver->socket_fd,
                  SOL_SOCKET,
-                 SOL_RCVTIMEO,
+                 SO_RCVTIMEO,
                  &timeout,
                  sizeof(timeout)) < 0) {
     perror("Failed to set socket timeout");

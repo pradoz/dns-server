@@ -1,6 +1,6 @@
 BUILD_DIR = build
 
-TESTS = test_dns_trie test_dns_records test_dns_parser test_dns_resolver test_dns_server test_dns_zone_file
+TESTS = test_dns_trie test_dns_records test_dns_parser test_dns_resolver test_dns_server test_dns_zone_file test_dns_recursive
 
 .PHONY: all build test test-verbose example clean run
 

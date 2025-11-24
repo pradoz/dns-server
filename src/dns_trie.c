@@ -1,4 +1,5 @@
 #include "dns_trie.h"
+#include "dns_zone_file.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -365,4 +366,45 @@ dns_rrset_t *rrset_map_lookup(rrset_map_t *map, dns_record_type_t type) {
   }
 
   return NULL;
+}
+
+bool dns_trie_is_empty(const dns_trie_t *trie) {
+  if (!trie || !trie->root) return true;
+  return (trie->root->children_count == 0);
+}
+
+static size_t count_records_recursive(dns_trie_node_t *node) {
+  if (!node) return 0;
+
+  size_t count = 0;
+
+  // count records at this node
+  if (node->rrsets) {
+    for (int i = 0; i < RRSET_MAP_SIZE; ++i) {
+      rrset_entry_t *entry = node->rrsets->buckets[i];
+      while (entry) {
+        count += entry->rrset->count;
+        entry = entry->next;
+      }
+    }
+  }
+
+  // make a recursive call for each child
+  for (size_t i = 0; i < node->children_count; ++i) {
+    count += count_records_recursive(node->children[i]);
+  }
+
+  return count;
+}
+
+size_t dns_trie_get_record_count(const dns_trie_t *trie) {
+  return trie ? count_records_recursive(trie->root) : 0;
+}
+
+const char *dns_trie_get_stats(const dns_trie_t *trie, char *buf, size_t len) {
+  if (!trie || !buf || len == 0) return "";
+
+  size_t record_count = dns_trie_get_record_count(trie);
+  snprintf(buf, len, "Total records: %zu", record_count);
+  return buf;
 }

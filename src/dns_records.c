@@ -1,7 +1,7 @@
 #include "dns_records.h"
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 
 dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t class, uint32_t ttl) {
@@ -61,6 +61,12 @@ bool dns_rrset_add(dns_rrset_t *rrset, dns_rr_t *rr) {
 }
 
 void dns_normalize_domain(const char *input, char *output) {
+  if (!input) {
+    if (output) output[0] = '\0';
+    return;
+  }
+  if (!output) return;
+
   size_t len = strlen(input);
   size_t right = 0;
 
@@ -74,6 +80,8 @@ void dns_normalize_domain(const char *input, char *output) {
 }
 
 bool dns_is_subdomain(const char *domain, const char *parent) {
+  if (!domain || !parent) return false;
+
   size_t domain_len = strlen(domain);
   size_t parent_len = strlen(parent);
 

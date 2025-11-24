@@ -94,11 +94,66 @@ static MunitResult test_is_subdomain(const MunitParameter params[], void *data) 
   return MUNIT_OK;
 }
 
+static MunitResult test_null_pointer_safety(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  // create with valid params
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
+  munit_assert_not_null(rr);
+
+  // free with NULL should not crash
+  dns_rr_free(NULL);
+  dns_rrset_free(NULL);
+
+  // add with NULL parameters
+  munit_assert_false(dns_rrset_add(NULL, rr));
+
+  dns_rrset_t *rrset = dns_rrset_create(DNS_TYPE_A, 300);
+  munit_assert_not_null(rrset);
+  munit_assert_false(dns_rrset_add(rrset, NULL));
+
+  // both NULL
+  munit_assert_false(dns_rrset_add(NULL, NULL));
+
+  // Test dns_normalize_domain with NULL parameters
+  char output[MAX_DOMAIN_NAME];
+
+  // NULL input, valid output. should create empty string
+  output[0] = 'X';
+  dns_normalize_domain(NULL, output);
+  munit_assert_char(output[0], ==, '\0');
+
+  // valid input, NULL output. should not crash
+  dns_normalize_domain("test.com", NULL);
+
+  // both NULL, should not crash
+  dns_normalize_domain(NULL, NULL);
+
+  // verify normal operation still works
+  dns_normalize_domain("TEST.COM", output);
+  munit_assert_string_equal(output, "test.com");
+
+  // subdomain with NULL parameters
+  munit_assert_false(dns_is_subdomain(NULL, "example.com"));
+  munit_assert_false(dns_is_subdomain("www.example.com", NULL));
+  munit_assert_false(dns_is_subdomain(NULL, NULL));
+
+  // verify normal operation still works
+  munit_assert_true(dns_is_subdomain("www.example.com", "example.com"));
+
+  dns_rr_free(rr);
+  dns_rrset_free(rrset);
+
+  return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
   {"/rr_create", test_rr_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/rrset_add", test_rrset_add, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/domain_normalization", test_domain_normalization, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/is_subdomain", test_is_subdomain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/null_pointer_safety", test_null_pointer_safety, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 

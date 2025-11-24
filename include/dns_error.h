@@ -22,6 +22,13 @@ typedef enum {
   DNS_ERR_UNSUPPORTED_TYPE
 } dns_error_code_t;
 
+typedef enum {
+  DNS_RESULT_SUCCESS = 0,
+  DNS_RESULT_ERROR = -1,
+  DNS_RESULT_NOT_FOUND = -2,
+  DNS_RESULT_INCOMPLETE = -3
+} dns_result_t;
+
 typedef struct {
   dns_error_code_t code;
   char message[256];

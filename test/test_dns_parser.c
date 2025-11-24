@@ -267,6 +267,250 @@ static MunitResult test_full_packet_query(const MunitParameter params[], void *d
   return MUNIT_OK;
 }
 
+static MunitResult test_error_response_helper(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  uint8_t buffer[512];
+  uint16_t query_id = 0xABCD;
+
+  // NULL buffer
+  int result = dns_build_error_response_header(NULL,
+                                           sizeof(buffer),
+                                           query_id,
+                                           DNS_RCODE_SERVFAIL,
+                                           false);
+  munit_assert_int(result, ==, -1);
+
+  // buffer too small
+  uint8_t small_buffer[8];
+  result = dns_build_error_response_header(small_buffer,
+                                           sizeof(small_buffer),
+                                           query_id,
+                                           DNS_RCODE_SERVFAIL,
+                                           false);
+  munit_assert_int(result, ==, -1);
+
+  // NOTIMP without question
+  result = dns_build_error_response_header(buffer,
+                                               sizeof(buffer),
+                                               query_id,
+                                               DNS_RCODE_NOTIMP,
+                                               false);
+  munit_assert_int(result, ==, 12);
+
+  dns_header_t decoded;
+  dns_parse_header(buffer, sizeof(buffer), &decoded);
+  munit_assert_int(decoded.id, ==, query_id);
+  munit_assert_int(decoded.qr, ==, DNS_QR_RESPONSE);
+  munit_assert_int(decoded.rcode, ==, DNS_RCODE_NOTIMP);
+  munit_assert_int(decoded.qdcount, ==, 0);
+  munit_assert_int(decoded.ancount, ==, 0);
+
+  // FORMERR with question
+  result = dns_build_error_response_header(buffer,
+                                           sizeof(buffer),
+                                           query_id,
+                                           DNS_RCODE_FORMERROR,
+                                           true);
+  munit_assert_int(result, ==, 12);
+
+  dns_parse_header(buffer, sizeof(buffer), &decoded);
+  munit_assert_int(decoded.rcode, ==, DNS_RCODE_FORMERROR);
+  munit_assert_int(decoded.qdcount, ==, 1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_parse_name_boundary_conditions(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  uint8_t buffer[256];
+  size_t offset;
+
+  // maximum length domain name (253 chars + null)
+  // [63 chars].[63 chars].[63 chars].[61 chars]
+  offset = 0;
+  int result = dns_encode_name(buffer, sizeof(buffer), &offset,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."
+    "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc."
+    "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+  munit_assert_int(result, ==, 0);
+
+  // label exactly 63 characters
+  offset = 0;
+  result = dns_encode_name(buffer, sizeof(buffer), &offset,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com");
+  munit_assert_int(result, ==, 0);
+
+  // label too long (64 characters), should fail
+  offset = 0;
+  result = dns_encode_name(buffer, sizeof(buffer), &offset,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com");
+  munit_assert_int(result, ==, -1);
+
+  // empty label, should fail
+  offset = 0;
+  result = dns_encode_name(buffer, sizeof(buffer), &offset, "test..com");
+  munit_assert_int(result, ==, -1);
+
+  // buffer too small, should fail
+  uint8_t small_buffer[5];
+  offset = 0;
+  result = dns_encode_name(small_buffer, sizeof(small_buffer), &offset, "example.com");
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_response_summary(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  uint8_t mock_response[] = {
+    // header: ID=0x1234, QR=1, RCODE=0
+    0x12, 0x34, 0x81, 0x80,
+    0x00, 0x01, // QDCOUNT = 1
+    0x00, 0x02, // ANCOUNT = 2
+    0x00, 0x01, // NSCOUNT = 1
+    0x00, 0x03, // ARCOUNT = 3
+  };
+
+  dns_response_summary_t summary;
+  int result = dns_parse_response_summary(mock_response, sizeof(mock_response), &summary);
+
+  munit_assert_int(result, ==, 0);
+  munit_assert_int(summary.query_id, ==, 0x1234);
+  munit_assert_int(summary.rcode, ==, DNS_RCODE_NOERROR);
+  munit_assert_int(summary.qdcount, ==, 1);
+  munit_assert_int(summary.ancount, ==, 2);
+  munit_assert_int(summary.nscount, ==, 1);
+  munit_assert_int(summary.arcount, ==, 3);
+  munit_assert_true(summary.is_response);
+
+  // buffer too small
+  result = dns_parse_response_summary(mock_response, 8, &summary);
+  munit_assert_int(result, ==, -1);
+
+  // NULL buffer
+  result = dns_parse_response_summary(NULL, sizeof(mock_response), &summary);
+  munit_assert_int(result, ==, -1);
+
+  // NULL summary
+  result = dns_parse_response_summary(mock_response, sizeof(mock_response), NULL);
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_write_uint16(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buf[10];
+  size_t offset = 0;
+
+  munit_assert_int(dns_write_uint16(buf, sizeof(buf), &offset, 0x1234), ==, 0);
+  munit_assert_size(offset, ==, 2);
+  munit_assert_uint8(buf[0], ==, 0x12);
+  munit_assert_uint8(buf[1], ==, 0x34);
+
+  // buffer too small
+  offset = 9;
+  munit_assert_int(dns_write_uint16(buf, sizeof(buf), &offset, 0x5678), ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_read_uint16(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buf[] = {0x12, 0x34, 0x56, 0x78};
+  size_t offset = 0;
+  uint16_t value;
+
+  munit_assert_int(dns_read_uint16(buf, sizeof(buf), &offset, &value), ==, 0);
+  munit_assert_uint16(value, ==, 0x1234);
+  munit_assert_size(offset, ==, 2);
+
+  munit_assert_int(dns_read_uint16(buf, sizeof(buf), &offset, &value), ==, 0);
+  munit_assert_uint16(value, ==, 0x5678);
+
+  // buffer overflow
+  munit_assert_int(dns_read_uint16(buf, sizeof(buf), &offset, &value), ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_write_uint32(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buf[10];
+  size_t offset = 0;
+
+  munit_assert_int(dns_write_uint32(buf, sizeof(buf), &offset, 0x12345678), ==, 0);
+  munit_assert_size(offset, ==, 4);
+  munit_assert_uint8(buf[0], ==, 0x12);
+  munit_assert_uint8(buf[1], ==, 0x34);
+  munit_assert_uint8(buf[2], ==, 0x56);
+  munit_assert_uint8(buf[3], ==, 0x78);
+
+  // buffer too small
+  offset = 7;
+  munit_assert_int(dns_write_uint32(buf, sizeof(buf), &offset, 0x9ABCDEF0), ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_read_uint32(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buf[] = {0x12, 0x34, 0x56, 0x78,
+                   0x9A, 0xBC, 0xDE, 0xF0};
+  size_t offset = 0;
+  uint32_t value;
+
+  munit_assert_int(dns_read_uint32(buf, sizeof(buf), &offset, &value), ==, 0);
+  munit_assert_uint32(value, ==, 0x12345678);
+  munit_assert_size(offset, ==, 4);
+
+  munit_assert_int(dns_read_uint32(buf, sizeof(buf), &offset, &value), ==, 0);
+  munit_assert_uint32(value, ==, 0x9ABCDEF0);
+
+  // buffer overflow
+  munit_assert_int(dns_read_uint32(buf, sizeof(buf), &offset, &value), ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_soa_rr_encoding(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buf[512];
+  size_t offset = 0;
+
+  dns_rr_t soa_record = {
+    .type = DNS_TYPE_SOA,
+    .class = DNS_CLASS_IN,
+    .ttl = 3600,
+  };
+
+  strcpy(soa_record.rdata.soa.mname, "ns1.example.com");
+  strcpy(soa_record.rdata.soa.rname, "admin.example.com");
+  soa_record.rdata.soa.serial = 2024010101;
+  soa_record.rdata.soa.refresh = 7200;
+  soa_record.rdata.soa.retry = 3600;
+  soa_record.rdata.soa.expire = 604800;
+  soa_record.rdata.soa.minimum = 86400;
+
+  int result = dns_encode_rr(buf, sizeof(buf), &offset, "example.com", &soa_record);
+  munit_assert_int(result, ==, 0);
+  munit_assert_size(offset, >, 50); // SOA records are large
+
+  return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
   {"/header_encoding", test_header_encoding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/name_encoding", test_name_encoding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -274,6 +518,14 @@ static MunitTest tests[] = {
   {"/rr_encoding", test_rr_encoding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/rr_encoding_manual_verify", test_rr_encoding_manual_verify, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/full_packet_query", test_full_packet_query, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/error_response_helper", test_error_response_helper, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/name_boundary", test_parse_name_boundary_conditions, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/response_summary", test_response_summary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/write_uint16", test_write_uint16, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/read_uint16", test_read_uint16, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/write_uint32", test_write_uint32, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/read_uint32", test_read_uint32, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/soa_rr_encoding", test_soa_rr_encoding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
 
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };

@@ -96,6 +96,10 @@ int main(int argc, char *argv[]) {
 
   dns_server_run(server);
 
+  char stats_buf[512];
+  dns_trie_get_stats(server->trie, stats_buf, sizeof(stats_buf));
+  printf("\n=== Trie Statistics ===\n%s\n", stats_buf);
+
   printf("\n=== Server Statistics ===\n");
   printf("Queries received:       %lu\n", server->queries_received);
   printf("Queries processed:      %lu\n", server->queries_processed);

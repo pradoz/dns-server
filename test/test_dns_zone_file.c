@@ -299,6 +299,56 @@ static MunitResult test_relative_names(const MunitParameter params[], void *data
   return MUNIT_OK;
 }
 
+static MunitResult test_blank_lines_and_whitespace(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *zone_content =
+    "\n"
+    "   \n" // blank with spaces
+    "www.example.com. 300 IN A 192.168.1.1\n"
+    "\t\n" // blank with tab
+    "mail.example.com. 300 IN A 192.168.1.2\n"
+    "\n\n";
+
+  char *filename = create_test_file(zone_content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  int load_result = zone_load_file(trie, filename, "example.com", &result);
+
+  munit_assert_int(load_result, ==, 0);
+  munit_assert_int(result.records_loaded, ==, 2);
+
+  dns_trie_free(trie);
+  cleanup_test_file(filename);
+  return MUNIT_OK;
+}
+
+static MunitResult test_ttl_inheritance(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *zone_content =
+    "$TTL 7200\n"
+    "www.example.com. IN A 192.168.1.1\n"  // should inherit 7200
+    "mail.example.com. 1800 IN A 192.168.1.2\n";  // explicit 1800
+
+  char *filename = create_test_file(zone_content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  zone_load_file(trie, filename, "example.com", &result);
+
+  dns_rrset_t *www = dns_trie_lookup(trie, "www.example.com", DNS_TYPE_A);
+  munit_assert_int(www->records->ttl, ==, 7200);
+
+  dns_rrset_t *mail = dns_trie_lookup(trie, "mail.example.com", DNS_TYPE_A);
+  munit_assert_int(mail->records->ttl, ==, 1800);
+
+  dns_trie_free(trie);
+  cleanup_test_file(filename);
+  return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
   {"/parser_create", test_parser_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/load_simple", test_load_simple, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -309,6 +359,8 @@ static MunitTest tests[] = {
   {"/directives", test_directives, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/mx_records", test_mx_records, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/relative_names", test_relative_names, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/blank_lines_and_whitespace", test_blank_lines_and_whitespace, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/ttl_inheritance", test_ttl_inheritance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 

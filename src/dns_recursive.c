@@ -115,7 +115,7 @@ int dns_recursive_add_upstream_server(dns_upstream_list_t *list,
     server->has_ipv4 = true;
     server->has_ipv6 = false;
 
-    snprintf(server->name, sizeof(server->name), "%s:%d\n", server_ip, port);
+    snprintf(server->name, sizeof(server->name), "%s:%d", server_ip, port);
     list->server_count++;
     return 0;
   }
@@ -320,24 +320,24 @@ int dns_recursive_handle_response(dns_recursive_resolver_t *resolver,
   if (!resolver || !response_buf || response_len < 12) return -1;
 
   // parse response header
-  dns_header_t header;
-  if (dns_parse_header(response_buf, response_len, &header) < 0) {
+  dns_response_summary_t summary;
+  if (dns_parse_response_summary(response_buf, response_len, &summary) < 0) {
     return -1;
   }
 
   // find matching query
-  dns_recursive_query_t *query = &resolver->active_queries[header.id & 0xFF];
-  if (query->query_id != header.id) {
-    printf("Received response for unknown query ID: %u\n", header.id);
+  dns_recursive_query_t *query = &resolver->active_queries[summary.query_id & 0xFF];
+  if (query->query_id != summary.query_id) {
+    printf("Received response for unknown query ID: %u\n", summary.query_id);
     return -1;
   }
 
   printf("Received response for %s (ID: %u, RCODE: %u, Answers: %u, Authority: %u)\n",
          query->qname,
-         header.id,
-         header.rcode,
-         header.ancount,
-         header.nscount);
+         summary.query_id,
+         summary.rcode,
+         summary.ancount,
+         summary.nscount);
 
   // update server stats
   for (int i = 0; i < query->current_servers.server_count; i++) {
@@ -345,7 +345,7 @@ int dns_recursive_handle_response(dns_recursive_resolver_t *resolver,
     server->responses_received++;
   }
 
-  if (header.rcode == DNS_RCODE_NOERROR && header.ancount > 0) {
+  if (summary.rcode == DNS_RCODE_NOERROR && summary.ancount > 0) {
     // found an answer, forward it back to the client
     dns_recursive_forward_response(resolver, query, response_buf, response_len);
 
@@ -354,7 +354,7 @@ int dns_recursive_handle_response(dns_recursive_resolver_t *resolver,
     resolver->forwarded_queries++;
     return 0;
 
-  } else if (header.rcode == DNS_RCODE_NOERROR && header.nscount > 0) {
+  } else if (summary.rcode == DNS_RCODE_NOERROR && summary.nscount > 0) {
     // found a referral, extract nameservers and continue
     query->recursion_depth++;
 
@@ -398,7 +398,7 @@ int dns_recursive_handle_response(dns_recursive_resolver_t *resolver,
     dns_recursive_forward_response(resolver, query, response_buf, response_len);
     query->query_id = 0;
 
-    if (header.rcode != DNS_RCODE_NXDOMAIN) {
+    if (summary.rcode != DNS_RCODE_NXDOMAIN) {
       resolver->failed_queries++;
     }
     return 0;
@@ -451,6 +451,7 @@ int dns_recursive_send_error_response(dns_recursive_resolver_t *resolver,
   uint8_t err_buf[512];
   size_t offset = 0;
 
+  // build error response with RA bit set
   dns_header_t error_header = {
     .id = query->original_id,
     .qr = DNS_QR_RESPONSE,
@@ -466,6 +467,7 @@ int dns_recursive_send_error_response(dns_recursive_resolver_t *resolver,
     .arcount = 0
   };
 
+  // Note: can't use dns_build_error_response_header here it assumes RA=1
   if (dns_encode_header(err_buf, sizeof(err_buf), &error_header) < 0) {
     return -1;
   }
@@ -478,6 +480,7 @@ int dns_recursive_send_error_response(dns_recursive_resolver_t *resolver,
   };
 
   strncpy(question.qname, query->qname, MAX_DOMAIN_NAME - 1);
+  question.qname[MAX_DOMAIN_NAME - 1] = '\0'; // ensure null terminated
 
   if (dns_encode_question(err_buf, sizeof(err_buf), &offset, &question) < 0) {
     return -1;
@@ -504,10 +507,10 @@ int dns_extract_nameservers_from_authority(const uint8_t *buffer,
                                            dns_upstream_list_t *servers) {
   if (!buffer || !servers || len < 12) return -1;
 
-  dns_header_t header;
-  if (dns_parse_header(buffer, len, &header) < 0) return -1;
+  dns_response_summary_t summary;
+  if (dns_parse_response_summary(buffer, len, &summary) < 0) return -1;
 
-  if (header.nscount == 0) {
+  if (summary.nscount == 0) {
     // no authority section, use fallback servers
     dns_recursive_add_upstream_server(servers, "8.8.8.8", 53);
     dns_recursive_add_upstream_server(servers, "1.1.1.1", 53);
@@ -517,7 +520,7 @@ int dns_extract_nameservers_from_authority(const uint8_t *buffer,
   size_t offset = 12;
 
   // skip question section
-  for (int i = 0; i < header.qdcount; ++i) {
+  for (int i = 0; i < summary.qdcount; ++i) {
     dns_question_t question;
     if (dns_parse_question(buffer, len, &offset, &question) < 0) {
       return -1;
@@ -525,7 +528,7 @@ int dns_extract_nameservers_from_authority(const uint8_t *buffer,
   }
 
   // skip answer section
-  for (int i = 0; i < header.ancount; ++i) {
+  for (int i = 0; i < summary.ancount; ++i) {
     char name[MAX_DOMAIN_NAME];
     if (dns_parse_name(buffer, len, &offset, name, sizeof(name)) < 0) {
       return -1;
@@ -547,7 +550,7 @@ int dns_extract_nameservers_from_authority(const uint8_t *buffer,
   char ns_names[16][MAX_DOMAIN_NAME]; // store NS names for IP lookup
   int ns_count = 0;
 
-  for (int i = 0; i < header.nscount && ns_count < 16; ++i) {
+  for (int i = 0; i < summary.nscount && ns_count < 16; ++i) {
     char name[MAX_DOMAIN_NAME];
     if (dns_parse_name(buffer, len, &offset, name, sizeof(name)) < 0) {
       break;
@@ -581,7 +584,7 @@ int dns_extract_nameservers_from_authority(const uint8_t *buffer,
   }
 
   // parse additional section for A records of NS servers
-  for (int i = 0; i < header.arcount && servers->server_count < DNS_MAX_UPSTREAM_SERVERS; i++) {
+  for (int i = 0; i < summary.arcount && servers->server_count < DNS_MAX_UPSTREAM_SERVERS; i++) {
     char name[MAX_DOMAIN_NAME];
     if (dns_parse_name(buffer, len, &offset, name, sizeof(name)) < 0) break;
 

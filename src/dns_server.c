@@ -80,7 +80,7 @@ dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
 
   server->trie = dns_trie_create();
   if (!server->trie) {
-    free(server->trie);
+    free(server);
     return NULL;
   }
 
@@ -365,14 +365,15 @@ int dns_process_query(dns_server_t *server,
     DNS_ERROR_SET(err, DNS_ERR_UNSUPPORTED_OPCODE, "Unsupported opcode");
 
     // send NOTIMP response
-    dns_header_t error_header = query_msg->header;
-    error_header.qr = DNS_QR_RESPONSE;
-    error_header.rcode = DNS_RCODE_NOTIMP;
-    error_header.ancount = 0;
-    error_header.nscount = 0;
-    error_header.arcount = 0;
-
-    dns_encode_header(response->buffer, response->capacity, &error_header);
+    if (dns_build_error_response_header(response->buffer,
+                                        response->capacity,
+                                        query_msg->header.id,
+                                        DNS_RCODE_NOTIMP,
+                                        false) < 0) {
+      dns_message_free(query_msg);
+      server->queries_failed++;
+      return -1;
+    }
     response->length = 12;
 
     dns_message_free(query_msg);
@@ -385,15 +386,15 @@ int dns_process_query(dns_server_t *server,
     DNS_ERROR_SET(err, DNS_ERR_INVALID_QUESTION, "Must have exactly one question");
 
     // send FORMERR response
-    dns_header_t error_header = query_msg->header;
-    error_header.qr = DNS_QR_RESPONSE;
-    error_header.rcode = DNS_RCODE_FORMERROR;
-    error_header.qdcount = 0;
-    error_header.ancount = 0;
-    error_header.nscount = 0;
-    error_header.arcount = 0;
-
-    dns_encode_header(response->buffer, response->capacity, &error_header);
+    if (dns_build_error_response_header(response->buffer,
+                                        response->capacity,
+                                        query_msg->header.id,
+                                        DNS_RCODE_FORMERROR,
+                                        false) < 0) {
+      dns_message_free(query_msg);
+      server->queries_failed++;
+      return -1;
+    }
     response->length = 12;
 
     dns_message_free(query_msg);
@@ -415,15 +416,15 @@ int dns_process_query(dns_server_t *server,
     DNS_ERROR_SET(err, DNS_ERR_INVALID_QUESTION, "Failed to parse question");
 
     // send FORMERR response
-    dns_header_t error_header = query_msg->header;
-    error_header.qr = DNS_QR_RESPONSE;
-    error_header.rcode = DNS_RCODE_FORMERROR;
-    error_header.qdcount = 0;
-    error_header.ancount = 0;
-    error_header.nscount = 0;
-    error_header.arcount = 0;
-
-    dns_encode_header(response->buffer, response->capacity, &error_header);
+    if (dns_build_error_response_header(response->buffer,
+                                        response->capacity,
+                                        query_msg->header.id,
+                                        DNS_RCODE_FORMERROR,
+                                        false) < 0) {
+      dns_message_free(query_msg);
+      server->queries_failed++;
+      return -1;
+    }
     response->length = 12;
 
     dns_message_free(query_msg);
@@ -512,18 +513,25 @@ int dns_process_query(dns_server_t *server,
                          &response->length,
                          &build_err) < 0) {
 
-    // failed to build response, send SERVFAIL
-    dns_header_t error_header = query_msg->header;
-    error_header.qr = DNS_QR_RESPONSE;
-    error_header.rcode = DNS_RCODE_SERVFAIL;
-    error_header.ancount = 0;
-    error_header.nscount = 0;
-    error_header.arcount = 0;
 
-    dns_encode_header(response->buffer, response->capacity, &error_header);
-    offset = 12;
-    dns_encode_question(response->buffer, response->capacity, &offset, query_msg->questions);
-    response->length = offset;
+    // failed to build response, send SERVFAIL
+    if (dns_build_error_response_header(response->buffer,
+                                        response->capacity,
+                                        query_msg->header.id,
+                                        DNS_RCODE_SERVFAIL,
+                                        true) >= 0) {
+      offset = 12;
+      dns_encode_question(response->buffer, response->capacity, &offset, query_msg->questions);
+      response->length = offset;
+    } else {
+      // error response failed, set minimal header
+      dns_build_error_response_header(response->buffer,
+                                      response->capacity,
+                                      query_msg->header.id,
+                                      DNS_RCODE_SERVFAIL,
+                                      false);
+      response->length = 12;
+    }
 
     fprintf(stderr, "Build error: %s (%s:%d)\n",
             build_err.message,

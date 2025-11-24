@@ -1,10 +1,19 @@
 #include "dns_parser.h"
+#include <netinet/in.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
 
+
+static int validate_label_length(size_t len) {
+  return (len > 0 && len <= MAX_LABEL_LEN) ? 0 : -1;
+}
+
+static int validate_name_length(size_t len) {
+  return (len <= MAX_DOMAIN_NAME) ? 0 : -1;
+}
 
 dns_message_t *dns_message_create(void) {
   dns_message_t *msg = calloc(1, sizeof(dns_message_t));
@@ -38,17 +47,17 @@ void dns_message_free(dns_message_t *msg) {
   free(msg);
 }
 
-int dns_parse_header(const uint8_t *buffer, size_t len, dns_header_t *header) {
+int dns_parse_header(const uint8_t *buf, size_t len, dns_header_t *header) {
   if (len < 12) return -1;
 
   uint16_t id, flags, qdcount, ancount, nscount, arcount;
 
-  memcpy(&id,      buffer + 0, 2);
-  memcpy(&flags,   buffer + 2, 2);
-  memcpy(&qdcount, buffer + 4, 2);
-  memcpy(&ancount, buffer + 6, 2);
-  memcpy(&nscount, buffer + 8, 2);
-  memcpy(&arcount, buffer + 10, 2);
+  memcpy(&id,      buf + 0, 2);
+  memcpy(&flags,   buf + 2, 2);
+  memcpy(&qdcount, buf + 4, 2);
+  memcpy(&ancount, buf + 6, 2);
+  memcpy(&nscount, buf + 8, 2);
+  memcpy(&arcount, buf + 10, 2);
 
   header->id = ntohs(id);
 
@@ -69,27 +78,18 @@ int dns_parse_header(const uint8_t *buffer, size_t len, dns_header_t *header) {
   return 12;
 }
 
-int dns_parse_question(const uint8_t *buffer, size_t len, size_t *offset, dns_question_t *question) {
-  if (dns_parse_name(buffer, len, offset, question->qname, MAX_DOMAIN_NAME) < 0) {
+int dns_parse_question(const uint8_t *buf, size_t len, size_t *offset, dns_question_t *question) {
+  if (dns_parse_name(buf, len, offset, question->qname, MAX_DOMAIN_NAME) < 0) {
     return -1;
   }
 
-  if (*offset + 4 > len) return -1;
-
-  uint16_t qtype, qclass;
-
-  memcpy(&qtype, buffer + *offset, 2);
-  *offset += 2;
-  memcpy(&qclass, buffer + *offset, 2);
-  *offset += 2;
-
-  question->qtype = ntohs(qtype);
-  question->qclass = ntohs(qclass);
+  if (dns_read_uint16(buf, len, offset, &question->qtype) < 0) return -1;
+  if (dns_read_uint16(buf, len, offset, &question->qclass) < 0) return -1;
 
   return 0;
 }
 
-int dns_parse_name(const uint8_t *buffer, size_t len, size_t *offset, char *name, size_t name_len) {
+int dns_parse_name(const uint8_t *buf, size_t len, size_t *offset, char *name, size_t name_len) {
   size_t pos = *offset;
   size_t name_pos = 0;
   size_t jump_pos = 0;
@@ -99,14 +99,14 @@ int dns_parse_name(const uint8_t *buffer, size_t len, size_t *offset, char *name
   int jumps = 0;
 
   while (pos < len) {
-    uint8_t label_len = buffer[pos];
+    uint8_t label_len = buf[pos];
 
     // check for compression pointer (0xC0 = 11000000)
     if ((label_len & 0xC0) == 0xC0) {
       // next 14 bits point to another location in the packet
       if (pos + 1 >= len) return -1;
 
-      uint16_t pointer = ((label_len & 0x3F) << 8) | buffer[pos+1];
+      uint16_t pointer = ((label_len & 0x3F) << 8) | buf[pos+1];
 
       if (!jumped) {
         jump_pos = pos + 2;
@@ -143,7 +143,7 @@ int dns_parse_name(const uint8_t *buffer, size_t len, size_t *offset, char *name
     if (name_pos + label_len + 1 >= name_len) return -1;
 
     ++pos;
-    memcpy(name + name_pos, buffer + pos, label_len);
+    memcpy(name + name_pos, buf + pos, label_len);
     name_pos += label_len;
     name[name_pos++] = '.';
     pos += label_len;
@@ -154,7 +154,7 @@ int dns_parse_name(const uint8_t *buffer, size_t len, size_t *offset, char *name
   // return name_pos > 0 ? name_pos - 1 : 0;
 }
 
-int dns_encode_header(uint8_t *buffer, size_t len, const dns_header_t *header) {
+int dns_encode_header(uint8_t *buf, size_t len, const dns_header_t *header) {
   if (len < 12) return  -1;
 
   uint16_t id, flags, qdcount, ancount, nscount, arcount;
@@ -176,47 +176,42 @@ int dns_encode_header(uint8_t *buffer, size_t len, const dns_header_t *header) {
   nscount = htons(header->nscount);
   arcount = htons(header->arcount);
 
-  memcpy(buffer +  0, &id,      2);
-  memcpy(buffer +  2, &flags,   2);
-  memcpy(buffer +  4, &qdcount, 2);
-  memcpy(buffer +  6, &ancount, 2);
-  memcpy(buffer +  8, &nscount, 2);
-  memcpy(buffer + 10, &arcount, 2);
+  memcpy(buf +  0, &id,      2);
+  memcpy(buf +  2, &flags,   2);
+  memcpy(buf +  4, &qdcount, 2);
+  memcpy(buf +  6, &ancount, 2);
+  memcpy(buf +  8, &nscount, 2);
+  memcpy(buf + 10, &arcount, 2);
 
   return 12;
 }
 
-int dns_encode_question(uint8_t *buffer, size_t len, size_t *offset, const dns_question_t *question) {
-  if (dns_encode_name(buffer, len, offset, question->qname) < 0) {
+int dns_encode_question(uint8_t *buf, size_t len, size_t *offset, const dns_question_t *question) {
+  if (dns_encode_name(buf, len, offset, question->qname) < 0) {
     return -1;
   }
 
-  if (*offset + 4 > len) return -1;
-
-  uint16_t qtype, qclass;
-
-  qtype = htons(question->qtype);
-  qclass = htons(question->qclass);
-
-  memcpy(buffer + *offset, &qtype,  2);
-  *offset += 2;
-  memcpy(buffer + *offset, &qclass, 2);
-  *offset += 2;
+  if (dns_write_uint16(buf, len, offset, question->qtype) < 0) return -1;
+  if (dns_write_uint16(buf, len, offset, question->qclass) < 0) return -1;
 
   return 0;
 }
 
-int dns_encode_name(uint8_t *buffer, size_t len, size_t *offset, const char *name) {
+int dns_encode_name(uint8_t *buf, size_t len, size_t *offset, const char *name) {
+  if (!buf || !offset || !name) return -1;
+
   size_t pos = *offset;
   const char *label_start = name;
 
   // root domain
   if (name[0] == '\0') {
     if (pos >= len) return -1;
-    buffer[pos++] = 0;
+    buf[pos++] = 0;
     *offset = pos;
     return 0;
   }
+
+  size_t total_length = 0;
 
   while (*label_start) {
     const char *label_end = strchr(label_start, '.');
@@ -228,11 +223,15 @@ int dns_encode_name(uint8_t *buffer, size_t len, size_t *offset, const char *nam
       label_len = strlen(label_start);
     }
 
-    if (label_len > MAX_LABEL_LEN || label_len == 0) return -1;
+    // validate before encoding
+    if (validate_label_length(label_len) < 0) return -1;
     if (pos + label_len + 1 >= len) return -1;
 
-    buffer[pos++] = label_len;
-    memcpy(buffer + pos, label_start, label_len);
+    total_length += label_len + 1;
+    if (validate_name_length(total_length) < 0) return -1;
+
+    buf[pos++] = (uint8_t)label_len;
+    memcpy(buf + pos, label_start, label_len);
     pos += label_len;
 
     if (label_end) {
@@ -243,31 +242,23 @@ int dns_encode_name(uint8_t *buffer, size_t len, size_t *offset, const char *nam
   }
 
   if (pos >= len) return -1;
+  buf[pos++] = 0;
 
-  buffer[pos++] = 0;
+  if (validate_name_length(total_length + 1) < 0) return -1;
+
   *offset = pos;
   return 0;
 }
 
-int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name, const dns_rr_t *rr) {
-  if (dns_encode_name(buffer, len, offset, name) < 0) {
+int dns_encode_rr(uint8_t *buf, size_t len, size_t *offset, const char *name, const dns_rr_t *rr) {
+  if (dns_encode_name(buf, len, offset, name) < 0) {
     return -1;
   }
   if (*offset + 10 > len) return -1;
 
-  uint16_t type, class;
-  uint32_t ttl;
-
-  type = htons(rr->type);
-  class = htons(rr->class);
-  ttl = htonl(rr->ttl);
-
-  memcpy(buffer + *offset, &type,  2);
-  *offset += 2;
-  memcpy(buffer + *offset, &class, 2);
-  *offset += 2;
-  memcpy(buffer + *offset, &ttl,   4);
-  *offset += 4;
+  if (dns_write_uint16(buf, len, offset, rr->type) < 0) return -1;
+  if (dns_write_uint16(buf, len, offset, rr->class) < 0) return -1;
+  if (dns_write_uint32(buf, len, offset, rr->ttl) < 0) return -1;
 
   size_t rdlength_offset = *offset;
   *offset += 2;  // TODO: rdlength
@@ -278,7 +269,7 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
   switch (rr->type) {
     case DNS_TYPE_A:
       if (*offset + 4 > len) return -1;
-      memcpy(buffer + *offset, &rr->rdata.a.address, 4);
+      memcpy(buf + *offset, &rr->rdata.a.address, 4);
       *offset += 4;
       break;
 
@@ -288,7 +279,7 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
       const char *domain = (rr->type == DNS_TYPE_NS)
         ? rr->rdata.ns.nsdname
         : rr->rdata.cname.cname;
-      if (dns_encode_name(buffer, len, offset, domain) < 0) return -1;
+      if (dns_encode_name(buf, len, offset, domain) < 0) return -1;
       break;
     }
 
@@ -302,8 +293,8 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
       // EXPIRE (4 bytes)
       // MINIMUM (4 bytes)
 
-      if (dns_encode_name(buffer, len, offset, rr->rdata.soa.mname) < 0) return -1;
-      if (dns_encode_name(buffer, len, offset, rr->rdata.soa.rname) < 0) return -1;
+      if (dns_encode_name(buf, len, offset, rr->rdata.soa.mname) < 0) return -1;
+      if (dns_encode_name(buf, len, offset, rr->rdata.soa.rname) < 0) return -1;
       if (*offset + 20 > len) return -1; // 5 * 4 bytes for the numbers
 
       uint32_t serial = htonl(rr->rdata.soa.serial);
@@ -312,17 +303,17 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
       uint32_t expire = htonl(rr->rdata.soa.expire);
       uint32_t minimum = htonl(rr->rdata.soa.minimum);
 
-      memcpy(buffer + *offset, &serial, 4);   *offset += 4;
-      memcpy(buffer + *offset, &refresh, 4);  *offset += 4;
-      memcpy(buffer + *offset, &retry, 4);    *offset += 4;
-      memcpy(buffer + *offset, &expire, 4);   *offset += 4;
-      memcpy(buffer + *offset, &minimum, 4);  *offset += 4;
+      memcpy(buf + *offset, &serial, 4);   *offset += 4;
+      memcpy(buf + *offset, &refresh, 4);  *offset += 4;
+      memcpy(buf + *offset, &retry, 4);    *offset += 4;
+      memcpy(buf + *offset, &expire, 4);   *offset += 4;
+      memcpy(buf + *offset, &minimum, 4);  *offset += 4;
       break;
     }
 
     case DNS_TYPE_AAAA:
       if (*offset + 16 > len) return -1;
-      memcpy(buffer + *offset, &rr->rdata.aaaa.address, 16);
+      memcpy(buf + *offset, &rr->rdata.aaaa.address, 16);
       *offset += 16;
       break;
 
@@ -331,7 +322,82 @@ int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name,
   }
 
   uint16_t rdlength = htons(*offset - rdata_start);
-  memcpy(buffer + rdlength_offset, &rdlength, 2);
+  memcpy(buf + rdlength_offset, &rdlength, 2);
 
+  return 0;
+}
+
+int dns_build_error_response_header(uint8_t *buf, size_t capacity,
+                                    uint16_t id, uint8_t rcode,
+                                    bool include_question) {
+  if (!buf || capacity < 12) return -1;
+
+  dns_header_t header = {
+    .id = id,
+    .qr = DNS_QR_RESPONSE,
+    .opcode = DNS_OPCODE_QUERY,
+    .aa = 0,
+    .tc = 0,
+    .rd = 1,
+    .ra = 0,
+    .rcode = rcode,
+    .qdcount = include_question ? 1 : 0,
+    .ancount = 0,
+    .nscount = 0,
+    .arcount = 0
+  };
+
+  return dns_encode_header(buf, capacity, &header);
+}
+
+int dns_parse_response_summary(const uint8_t *buf, size_t len,
+                               dns_response_summary_t *summary) {
+  if (!buf || !summary || len < 12) return -1;
+
+  dns_header_t header;
+  if (dns_parse_header(buf, len, &header) < 0) return -1;
+
+  summary->query_id = header.id;
+  summary->rcode = header.rcode;
+  summary->qdcount = header.qdcount;
+  summary->ancount = header.ancount;
+  summary->nscount = header.nscount;
+  summary->arcount = header.arcount;
+  summary->is_response = (header.qr == DNS_QR_RESPONSE);
+
+  return 0;
+}
+
+int dns_write_uint16(uint8_t *buf, size_t len, size_t *offset, uint16_t value) {
+  if (!buf || !offset || *offset + 2 > len) return -1;
+  uint16_t network_value = htons(value);
+  memcpy(buf + *offset, &network_value, 2);
+  *offset += 2;
+  return 0;
+}
+
+int dns_write_uint32(uint8_t *buf, size_t len, size_t *offset, uint32_t value) {
+  if (!buf || !offset || *offset + 4 > len) return -1;
+  uint32_t network_value = htonl(value);
+  memcpy(buf + *offset, &network_value, 4);
+  *offset += 4;
+  return 0;
+}
+
+int dns_read_uint16(const uint8_t *buf, size_t len, size_t *offset, uint16_t *value) {
+  if (!buf || !offset || !value || *offset + 2 > len) return -1;
+  uint16_t network_value;
+  memcpy(&network_value, buf + *offset, 2);
+  *value = ntohs(network_value);
+  *offset += 2;
+  return 0;
+}
+
+int dns_read_uint32(const uint8_t *buf, size_t len, size_t *offset, uint32_t *value) {
+  if (!buf || !offset || !value || *offset + 4 > len) return -1;
+  uint32_t network_value;
+  memcpy(&network_value, buf + *offset, 4);
+  *value = ntohl(network_value);
+  *offset += 4;
   return 0;
 }

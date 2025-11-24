@@ -60,18 +60,39 @@ typedef struct {
     dns_rr_t **additional;
 } dns_message_t;
 
+typedef struct {
+  uint16_t query_id;
+  uint8_t rcode;
+  uint16_t qdcount;
+  uint16_t ancount;
+  uint16_t nscount;
+  uint16_t arcount;
+  bool is_response;
+} dns_response_summary_t;
+
 
 dns_message_t *dns_message_create(void);
 void dns_message_free(dns_message_t *msg);
 
-int dns_parse_header(const uint8_t *buffer, size_t len, dns_header_t *header);
-int dns_parse_question(const uint8_t *buffer, size_t len, size_t *offset, dns_question_t *question);
-int dns_parse_name(const uint8_t *buffer, size_t len, size_t *offset, char *name, size_t name_len);
+int dns_parse_header(const uint8_t *buf, size_t len, dns_header_t *header);
+int dns_parse_question(const uint8_t *buf, size_t len, size_t *offset, dns_question_t *question);
+int dns_parse_name(const uint8_t *buf, size_t len, size_t *offset, char *name, size_t name_len);
 
-int dns_encode_header(uint8_t *buffer, size_t len, const dns_header_t *header);
-int dns_encode_question(uint8_t *buffer, size_t len, size_t *offset, const dns_question_t *question);
-int dns_encode_name(uint8_t *buffer, size_t len, size_t *offset, const char *name);
-int dns_encode_rr(uint8_t *buffer, size_t len, size_t *offset, const char *name, const dns_rr_t *rr);
+int dns_encode_header(uint8_t *buf, size_t len, const dns_header_t *header);
+int dns_encode_question(uint8_t *buf, size_t len, size_t *offset, const dns_question_t *question);
+int dns_encode_name(uint8_t *buf, size_t len, size_t *offset, const char *name);
+int dns_encode_rr(uint8_t *buf, size_t len, size_t *offset, const char *name, const dns_rr_t *rr);
+
+int dns_parse_response_summary(const uint8_t *buf, size_t len, dns_response_summary_t *summary);
+int dns_build_error_response_header(uint8_t *buf, size_t capacity,
+                                    uint16_t id, uint8_t rcode,
+                                    bool include_question);
+
+// buf utils
+int dns_write_uint16(uint8_t *buf, size_t len, size_t *offset, uint16_t value);
+int dns_write_uint32(uint8_t *buf, size_t len, size_t *offset, uint32_t value);
+int dns_read_uint16(const uint8_t *buf, size_t len, size_t *offset, uint16_t *value);
+int dns_read_uint32(const uint8_t *buf, size_t len, size_t *offset, uint32_t *value);
 
 
 #endif // DNS_PARSER_H

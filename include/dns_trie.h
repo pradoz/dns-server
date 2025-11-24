@@ -73,6 +73,9 @@ rrset_map_t *rrset_map_create(void);
 void rrset_map_free(rrset_map_t *map);
 bool rrset_map_insert(rrset_map_t *map, dns_record_type_t type, dns_rrset_t *rrset);
 dns_rrset_t *rrset_map_lookup(rrset_map_t *map, dns_record_type_t type);
+bool dns_trie_is_empty(const dns_trie_t *trie);
+size_t dns_trie_get_record_count(const dns_trie_t *trie);
+const char *dns_trie_get_stats(const dns_trie_t *trie, char *buf, size_t len);
 
 
 #endif // DNS_TRIE_H

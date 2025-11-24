@@ -87,7 +87,12 @@ static bool zone_read_line(zone_parser_t *parser) {
     size_t len = strlen(parser->curr_line);
     if (len > 0 && parser->curr_line[len-1] == '\n') {
       parser->curr_line[len-1] = '\0';
+      --len;
     }
+
+    char *ptr = parser->curr_line;
+    while (*ptr && isspace((unsigned char)*ptr)) ++ptr;
+    if (*ptr == '\0') continue; // blank line, read next line
 
     // handle directives
     if (parser->curr_line[0] == '$') {

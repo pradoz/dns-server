@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 
@@ -104,6 +105,11 @@ typedef struct {
   size_t count;
 } dns_rrset_t;
 
+static inline void dns_safe_strncpy(char *dest, const char *src, size_t dest_size) {
+  if (!dest || !src || dest_size == 0) return;
+  strncpy(dest, src, dest_size - 1);
+  dest[dest_size - 1] = '\0';
+}
 
 dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t class, uint32_t ttl);
 void dns_rr_free(dns_rr_t *rr);

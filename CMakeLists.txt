@@ -88,3 +88,11 @@ target_include_directories(test_dns_recursive PRIVATE
   ${CMAKE_SOURCE_DIR}/test/munit
 )
 add_test(NAME test_dns_recursive COMMAND test_dns_recursive)
+
+add_executable(test_dns_bugs test/test_dns_bugs.c test/munit/munit.c)
+target_link_libraries(test_dns_bugs dns_lib)
+target_include_directories(test_dns_bugs PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  ${CMAKE_SOURCE_DIR}/test/munit
+)
+add_test(NAME test_dns_bugs COMMAND test_dns_bugs)

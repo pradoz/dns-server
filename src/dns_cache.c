@@ -494,16 +494,128 @@ dns_cache_result_t *dns_cache_lookup(dns_cache_t *cache,
                                      const char *qname,
                                      dns_record_type_t qtype,
                                      dns_class_t qclass) {
+  if (!cache || !qname) return NULL;
+
+  cache->stats.queries++;
+
+  unsigned int hash = dns_cache_hash(qname, qtype, qclass);
+  dns_cache_entry_t *entry = cache->hash_table[hash];
+
+  // search collision chain
+  while (entry) {
+    if (dns_cache_key_match(entry, qname, qtype, qclass)) {
+      // check if expired
+      if (dns_cache_entry_expired(entry)) {
+        cache->stats.expired++;
+        cache->stats.misses++;
+        return NULL;
+      }
+
+      // prepare result
+      dns_cache_result_t *result = calloc(1, sizeof(dns_cache_result_t));
+      if (!result) {
+        cache->stats.misses++;
+        return NULL;
+      }
+
+      result->found = true;
+      result->type = entry->entry_type;
+      result->rcode = entry->rcode;
+      result->remaining_ttl = dns_cache_entry_remaining_ttl(entry);
+
+      // if its a positive entry, copy records
+      if (entry->entry_type == DNS_CACHE_TYPE_POSITIVE && entry->records) {
+        result->records = dns_cache_copy_records(entry->records);
+        result->record_count = entry->record_count;
+
+        for (dns_rr_t *rr = result->records; rr != NULL; rr = rr->next) {
+          rr->ttl = result->remaining_ttl;
+        }
+      } else {
+        result->records = NULL;
+        result->record_count = 0;
+      }
+
+      // update stats
+      cache->stats.hits++;
+      if (entry->entry_type == DNS_CACHE_TYPE_POSITIVE) {
+        cache->stats.positive_hits++;
+      } else {
+        cache->stats.negative_hits++;
+        if (entry->entry_type == DNS_CACHE_TYPE_NXDOMAIN) {
+          cache->stats.nxdomain_hits++;
+        } else if (entry->entry_type == DNS_CACHE_TYPE_NODATA) {
+          cache->stats.nodata_hits++;
+        }
+      }
+
+      dns_cache_lru_touch(cache, entry);
+      return result;
+    }
+
+    entry = entry->next;
+  }
+
+  // not found
+  cache->stats.misses++;
+  return NULL;
 }
 
 void dns_cache_result_free(dns_cache_result_t *result) {
+  if (!result) return;
+  if (result->records) dns_rr_free(result->records);
+  free(result);
 }
 
 int dns_cache_remove_expired(dns_cache_t *cache) {
+  if (!cache) return -1;
+
+  int removed_count = 0;
+  time_t now = time(NULL);
+
+  for (int i = 0; i < DNS_CACHE_HASH_SIZE; ++i) {
+    dns_cache_entry_t **curr = &cache->hash_table[i];
+    while (*curr) {
+      dns_cache_entry_t *entry = *curr;
+
+      if (now >= entry->expiration) {
+        *curr = entry->next; // remove from collision chain
+        dns_cache_lru_remove(cache, entry); // remove from LRU list
+        dns_cache_entry_free(entry);
+
+        cache->current_entries--;
+        ++removed_count;
+      } else {
+        curr = &(*curr)->next;
+      }
+    }
+  }
+
+  return removed_count;
 }
 
 int dns_cache_remove_entry(dns_cache_t *cache,
                            const char *qname,
                            dns_record_type_t qtype,
                            dns_class_t qclass) {
+  if (!cache || !qname) return -1;
+
+  unsigned int hash = dns_cache_hash(qname, qtype, qclass);
+  dns_cache_entry_t **curr = &cache->hash_table[hash];
+
+  while (*curr) {
+    dns_cache_entry_t *entry = *curr;
+
+    if (dns_cache_key_match(entry, qname, qtype, qclass)) {
+        *curr = entry->next; // remove from collision chain
+        dns_cache_lru_remove(cache, entry); // remove from LRU list
+        dns_cache_entry_free(entry);
+        cache->current_entries--;
+        return 0;
+    }
+
+    curr = &(*curr)->next;
+  }
+
+  return -1;
 }

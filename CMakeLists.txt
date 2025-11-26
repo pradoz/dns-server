@@ -16,6 +16,7 @@ set(LIB_SOURCES
   src/dns_server.c
   src/dns_zone_file.c
   src/dns_recursive.c
+  src/dns_cache.c
 )
 
 # main executable sources

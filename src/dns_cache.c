@@ -159,7 +159,7 @@ void dns_cache_set_negative_ttl(dns_cache_t *cache, uint32_t ttl) {
 
 void dns_cache_set_negative_cache_enabled(dns_cache_t *cache, bool enabled) {
   if (!cache) return;
-  cache->enable_negative_cache = false;
+  cache->enable_negative_cache = enabled;
 }
 
 static void dns_cache_lru_touch(dns_cache_t *cache, dns_cache_entry_t *entry) {

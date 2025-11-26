@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 
-// see dns.md for a visual break down
+// see docs/parsing.md for a visual break down
 
 #define DNS_QR_QUERY    0
 #define DNS_QR_RESPONSE 1

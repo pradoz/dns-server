@@ -1,5 +1,6 @@
 #include "dns_resolver.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <strings.h>
 #include <arpa/inet.h>
@@ -258,3 +259,132 @@ int dns_add_authority_soa(dns_trie_t *trie,
   return -1;
 }
 
+static void dns_resolver_cache_store(dns_resolver_t *resolver,
+                                     const dns_question_t *question,
+                                     const dns_resolution_result_t *result) {
+  if (!resolver || !resolver->cache_enabled || !resolver->cache) return;
+  if (!question || !result) return;
+
+  if (result->rcode == DNS_RCODE_NOERROR && result->answer_list) {
+    uint32_t min_ttl = UINT32_MAX;
+    int count = 0;
+
+    for (dns_rr_t *rr = result->answer_list; rr != NULL; rr = rr->next) {
+      if (rr->ttl < min_ttl) min_ttl = rr->ttl; // min(rr->ttl, min_ttl)
+      ++count;
+    }
+
+    if (min_ttl > 0 && count > 0) {
+      dns_cache_insert(resolver->cache,
+                       question->qname,
+                       question->qtype,
+                       question->qclass,
+                       result->answer_list,
+                       count,
+                       min_ttl);
+    }
+  } else if (result->rcode == DNS_RCODE_NXDOMAIN) {
+    // cache negative response (default 5 minutes)
+    uint32_t ttl = 300;
+
+    // get TTL from SOA if available
+    if (result->authority_list && result->authority_list->type == DNS_TYPE_SOA) {
+      ttl = result->authority_list->rdata.soa.minimum;
+    }
+
+    dns_cache_insert_negative(resolver->cache,
+                              question->qname,
+                              question->qtype,
+                              question->qclass,
+                              DNS_CACHE_TYPE_NXDOMAIN,
+                              DNS_RCODE_NXDOMAIN,
+                              ttl);
+  }
+}
+
+static bool dns_resolver_cache_lookup(dns_resolver_t *resolver,
+                                      const dns_question_t *question,
+                                      dns_resolution_result_t *result) {
+  if (!resolver || !resolver->cache_enabled || !resolver->cache) return false;
+  if (!question || !result) return false;
+
+  dns_cache_result_t *cache_result = dns_cache_lookup(resolver->cache,
+                                                      question->qname,
+                                                      question->qtype,
+                                                      question->qclass);
+  if (!cache_result) {
+    resolver->cache_misses++;
+    return false;
+  }
+
+  if (cache_result->type == DNS_CACHE_TYPE_POSITIVE) {
+    result->answer_list = cache_result->records;
+    result->answer_count = cache_result->record_count;
+    result->rcode = DNS_RCODE_NOERROR;
+
+    cache_result->records = NULL; // prevent double-free
+  } else if (cache_result->type == DNS_CACHE_TYPE_NXDOMAIN) {
+    result->rcode = DNS_RCODE_NXDOMAIN;
+    result->answer_code = 0;
+  } else {
+    result->rcode = DNS_RCODE_NOERROR;
+    result->answer_code = 0;
+  }
+
+  dns_cache_result_free(cache_result);
+  return true;
+}
+
+dns_resolver_t *dns_resolver_create(void) {
+  dns_resolver_t *resolver = calloc(1, sizeof(dns_resolver_t));
+  if (!resolver) return NULL;
+
+  resolver->trie = dns_trie_create();
+  if (!resolver->trie) {
+    dns_trie_free(resolver->trie);
+    free(resolver);
+    return NULL;
+  }
+
+  resolver->cache_enabled = true;
+  resolver->queries = 0;
+  resolver->cache_hits = 0;
+  resolver->cache_misses = 0;
+  return resolver;
+}
+
+void dns_resolver_free(dns_resolver_t *resolver) {
+  if (!resolver) return;
+
+  if (resolver->trie) dns_trie_free(resolver->trie);
+  if (resolver->cache) dns_cache_free(resolver->cache);
+  free(resolver);
+}
+
+void dns_resolver_set_cache_enabled(dns_resolver_t *resolver, bool enabled) {
+  if (!resolver) return;
+  resolver->cache_enabled = enabled;
+}
+
+int dns_resolver_query_with_cache(dns_resolver_t *resolver,
+                                   const dns_question_t *question,
+                                   dns_resolution_result_t *result,
+                                   dns_error_t *err) {
+  if (!resolver || !question || !result) return -1;
+
+  resolver->queries++;
+
+  // try cache first
+  if (dns_resolver_cache_lookup(resolver, question, result)) {
+    return 0; // got a hit
+  }
+
+  // cache miss, fallback to normal resolution
+  int ret = dns_resolve_query_full(resolver->trie, question, result, err);
+  if (ret == 0) {
+    // store result in cache
+    dns_resolver_cache_store(resolver, question, result);
+  }
+
+  return ret;
+}

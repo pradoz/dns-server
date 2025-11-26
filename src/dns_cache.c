@@ -29,7 +29,7 @@ static bool dns_cache_key_match(const dns_cache_entry_t *entry,
                                 dns_class_t qclass) {
   return (entry->qtype == qtype
        && entry->qclass == qclass
-       && strcmp(entry->qname, qname) == 0);
+       && strcasecmp(entry->qname, qname) == 0);
 }
 dns_cache_t *dns_cache_create(size_t max_entries) {
   dns_cache_t *cache = calloc(1, sizeof(dns_cache_t));

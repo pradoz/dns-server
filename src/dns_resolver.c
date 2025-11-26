@@ -1,5 +1,6 @@
 #include "dns_resolver.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <strings.h>
 #include <arpa/inet.h>
@@ -258,3 +259,61 @@ int dns_add_authority_soa(dns_trie_t *trie,
   return -1;
 }
 
+static void dns_resolver_cache_store(dns_resolver_t *resolver,
+                                     const dns_question_t *question,
+                                     const dns_resolution_result_t *result) {
+  if (!resolver || !resolver->cache_enabled || !resolver->cache) return;
+  if (!question || !result) return;
+
+  if (result->rcode == DNS_RCODE_NOERROR && result->answer_list) {
+    uint32_t min_ttl = UINT32_MAX;
+    int count = 0;
+
+    for (dns_rr_t *rr = result->answer_list; rr != NULL; rr = rr->next) {
+      if (rr->ttl < min_ttl) min_ttl = rr->ttl; // min(rr->ttl, min_ttl)
+      ++count;
+    }
+
+    if (min_ttl > 0 && count > 0) {
+      dns_cache_insert(resolver->cache,
+                       question->qname,
+                       question->qtype,
+                       question->qclass,
+                       result->answer_list,
+                       count,
+                       min_ttl);
+    }
+  } else if (result->DNS_RCODE_NXDOMAIN) {
+    // cache negative response (default 5 minutes)
+    uint32_t ttl = 300;
+
+    // get TTL from SOA if available
+    if (result->authority_list && result->authority_list->type == DNS_TYPE_SOA) {
+      ttl = result->authority_list->rdata.soa.minimum;
+    }
+
+    dns_cache_insert_negative(resolver->cache,
+                              question->qname,
+                              question->qtype,
+                              question->qclass,
+                              DNS_CACHE_TYPE_NXDOMAIN,
+                              DNS_RCODE_NXDOMAIN,
+                              ttl);
+  }
+}
+
+static bool dns_resolver_cache_lookup(dns_resolver_t *resolver,
+                                      const dns_question_t *question,
+                                      dns_resolution_result_t *result) {
+  if (!resolver || !resolver->cache_enabled || !resolver->cache) return false;
+  if (!question || !result) return false;
+  // TODO
+}
+
+dns_resolver_t *dns_resolver_create(void);
+void dns_resolver_free(dns_resolver_t *resolver);
+void dns_resolver_set_cache_enabled(dns_resolver_t *resolver, bool enabled);
+int dns_resolver_query_with_cache(dns_resolver_t *resolver,
+                                   const dns_question_t *question,
+                                   dns_resolution_result_t *result,
+                                   dns_error_t *err) {

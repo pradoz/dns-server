@@ -1,11 +1,10 @@
 #include "munit.h"
 #include "dns_cache.h"
-#include <string.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 
 
-static MunitResult test_cache_create(const MunitParameter params[], void *data) {
+static MunitResult test_create(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(100);
@@ -20,7 +19,24 @@ static MunitResult test_cache_create(const MunitParameter params[], void *data) 
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_insert_positive(const MunitParameter params[], void *data) {
+static MunitResult test_toggle_negative(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(100);
+  munit_assert_not_null(cache);
+  munit_assert_true(cache->enable_negative_cache); // enabled by default
+
+  dns_cache_set_negative_cache_enabled(cache, false);
+  munit_assert_false(cache->enable_negative_cache);
+
+  dns_cache_set_negative_cache_enabled(cache, true);
+  munit_assert_true(cache->enable_negative_cache);
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_insert_positive(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -46,7 +62,7 @@ static MunitResult test_cache_insert_positive(const MunitParameter params[], voi
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_insert_negative(const MunitParameter params[], void *data) {
+static MunitResult test_insert_negative(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -66,7 +82,7 @@ static MunitResult test_cache_insert_negative(const MunitParameter params[], voi
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_eviction(const MunitParameter params[], void *data) {
+static MunitResult test_eviction(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(3);  // start with 3 entries
@@ -110,7 +126,7 @@ static MunitResult test_ttl_clamping(const MunitParameter params[], void *data) 
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_stats(const MunitParameter params[], void *data) {
+static MunitResult test_stats(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -131,7 +147,7 @@ static MunitResult test_cache_stats(const MunitParameter params[], void *data) {
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_lookup_hit(const MunitParameter params[], void *data) {
+static MunitResult test_lookup_hit(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -173,7 +189,7 @@ static MunitResult test_cache_lookup_hit(const MunitParameter params[], void *da
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_lookup_miss(const MunitParameter params[], void *data) {
+static MunitResult test_lookup_miss(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -193,7 +209,7 @@ static MunitResult test_cache_lookup_miss(const MunitParameter params[], void *d
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_negative_lookup(const MunitParameter params[], void *data) {
+static MunitResult test_negative_lookup(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -224,7 +240,7 @@ static MunitResult test_cache_negative_lookup(const MunitParameter params[], voi
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_expiration(const MunitParameter params[], void *data) {
+static MunitResult test_expiration(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -258,7 +274,7 @@ static MunitResult test_cache_expiration(const MunitParameter params[], void *da
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_remove_expired(const MunitParameter params[], void *data) {
+static MunitResult test_remove_expired(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -292,7 +308,7 @@ static MunitResult test_cache_remove_expired(const MunitParameter params[], void
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_remove_entry(const MunitParameter params[], void *data) {
+static MunitResult test_remove_entry(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -322,7 +338,7 @@ static MunitResult test_cache_remove_entry(const MunitParameter params[], void *
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_case_insensitive(const MunitParameter params[], void *data) {
+static MunitResult test_case_insensitive(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -347,7 +363,7 @@ static MunitResult test_cache_case_insensitive(const MunitParameter params[], vo
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_hit_rate(const MunitParameter params[], void *data) {
+static MunitResult test_hit_rate(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -381,7 +397,7 @@ static MunitResult test_cache_hit_rate(const MunitParameter params[], void *data
   return MUNIT_OK;
 }
 
-static MunitResult test_cache_multiple_records(const MunitParameter params[], void *data) {
+static MunitResult test_multiple_records(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
   dns_cache_t *cache = dns_cache_create(10);
@@ -422,21 +438,22 @@ static MunitResult test_cache_multiple_records(const MunitParameter params[], vo
 
 
 static MunitTest tests[] = {
-  {"/operations/create", test_cache_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/operations/insert_positive", test_cache_insert_positive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/operations/insert_negative", test_cache_insert_negative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/operations/eviction", test_cache_eviction, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/create", test_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/toggle_negative", test_toggle_negative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/insert_positive", test_insert_positive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/insert_negative", test_insert_negative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/eviction", test_eviction, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/operations/ttl_clamping", test_ttl_clamping, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/operations/stats", test_cache_stats, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/hit", test_cache_lookup_hit, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/miss", test_cache_lookup_miss, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/negative_lookup", test_cache_negative_lookup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/expiration", test_cache_expiration, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/remove_expired", test_cache_remove_expired, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/remove_entry", test_cache_remove_entry, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/case_insensitive", test_cache_case_insensitive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/hit_rate", test_cache_hit_rate, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/multiple_records", test_cache_multiple_records, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/stats", test_stats, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/hit", test_lookup_hit, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/miss", test_lookup_miss, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/negative_lookup", test_negative_lookup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/expiration", test_expiration, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/remove_expired", test_remove_expired, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/remove_entry", test_remove_entry, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/case_insensitive", test_case_insensitive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/hit_rate", test_hit_rate, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/multiple_records", test_multiple_records, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 

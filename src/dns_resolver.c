@@ -166,8 +166,7 @@ int dns_resolve_cname_chain(dns_trie_t *trie,
 
   chain->count = 0;
   char curr_name[MAX_DOMAIN_NAME];
-  strncpy(curr_name, start_name, MAX_DOMAIN_NAME - 1);
-  curr_name[MAX_DOMAIN_NAME - 1] = '\0';
+  dns_safe_strncpy(curr_name, start_name, sizeof(curr_name));
   while (chain->count < DNS_MAX_CNAME_CHAIN) {
     // check for loop
     if (is_in_cname_chain(chain, curr_name)) {
@@ -177,8 +176,7 @@ int dns_resolve_cname_chain(dns_trie_t *trie,
     }
 
     // record this name in the chain
-    strncpy(chain->names[chain->count], curr_name, MAX_DOMAIN_NAME - 1);
-    chain->names[chain->count][MAX_DOMAIN_NAME - 1] = '\0';
+    dns_safe_strncpy(chain->names[chain->count], curr_name, sizeof(chain->names[chain->count]));
     chain->count++;
 
     // look for CNAME at current name
@@ -194,12 +192,11 @@ int dns_resolve_cname_chain(dns_trie_t *trie,
         return -1;
       }
 
-      strncpy(cname_rr->rdata.cname.cname, cname->cname, MAX_DOMAIN_NAME - 1);
+      dns_safe_strncpy(cname_rr->rdata.cname.cname, cname->cname, sizeof(cname_rr->rdata.cname.cname));
       dns_rr_list_append(&result->answer_list, &result->answer_count, cname_rr);
 
       // follow the CNAME
-      strncpy(curr_name, cname->cname, MAX_DOMAIN_NAME - 1);
-      curr_name[MAX_DOMAIN_NAME - 1] = '\0';
+      dns_safe_strncpy(curr_name, cname->cname, sizeof(curr_name));
       continue;
     }
 
@@ -247,7 +244,7 @@ int dns_add_authority_soa(dns_trie_t *trie,
   if (!soa_rr) return -1;
 
   memcpy(&soa_rr->rdata.soa, zone->soa, sizeof(dns_soa_t));
-  strncpy(result->authority_zone_name, zone->zone_name, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(result->authority_zone_name, zone->zone_name, sizeof(result->authority_zone_name));
 
   // add SOA to authority list
   if (dns_rr_list_append(&result->authority_list, &result->authority_count, soa_rr)) {

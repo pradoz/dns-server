@@ -1,7 +1,10 @@
 #include "dns_records.h"
+#include <arpa/inet.h>
 #include <ctype.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 
 
 dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t cls, uint32_t ttl) {
@@ -58,6 +61,109 @@ bool dns_rrset_add(dns_rrset_t *rrset, dns_rr_t *rr) {
 
   if (rrset->count == 1) rrset->ttl = rr->ttl;
   return true;
+}
+
+dns_rr_t *dns_rr_create_a(uint32_t address, uint32_t ttl) {
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  rr->rdata.a.address = address;
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_a_str(const char *ip_str, uint32_t ttl) {
+  if (!ip_str) return NULL;
+  struct in_addr addr;
+  if (inet_pton(AF_INET, ip_str, &addr) != 1) return NULL;
+  return dns_rr_create_a(addr.s_addr, ttl);
+}
+
+dns_rr_t *dns_rr_create_aaaa(const uint8_t address[16], uint32_t ttl) {
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_AAAA, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  memcpy(rr->rdata.aaaa.address, address, 16);
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_aaaa_str(const char *ip_str, uint32_t ttl) {
+  if (!ip_str) return NULL;
+  struct in6_addr addr;
+  if (inet_pton(AF_INET6, ip_str, &addr) != 1) return NULL;
+  return dns_rr_create_aaaa(addr.s6_addr, ttl);
+}
+
+dns_rr_t *dns_rr_create_ns(const char *nsdname, uint32_t ttl) {
+  if (!nsdname) return NULL;
+
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_NS, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  dns_safe_strncpy(rr->rdata.ns.nsdname, nsdname, sizeof(rr->rdata.ns.nsdname));
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_cname(const char *cname, uint32_t ttl) {
+  if (!cname) return NULL;
+
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_CNAME, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  dns_safe_strncpy(rr->rdata.cname.cname, cname, sizeof(rr->rdata.cname.cname));
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_mx(uint16_t preference, const char *exchange, uint32_t ttl) {
+  if (!exchange) return NULL;
+
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_MX, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  rr->rdata.mx.preference = preference;
+  dns_safe_strncpy(rr->rdata.mx.exchange, exchange, sizeof(rr->rdata.mx.exchange));
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_txt(const char *text, uint32_t ttl) {
+  if (!text) return NULL;
+
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_TXT, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  size_t len = strlen(text);
+  rr->rdata.txt.text = malloc(len + 1);
+  if (!rr->rdata.txt.text) {
+    dns_rr_free(rr);
+    return NULL;
+  }
+
+  memcpy(rr->rdata.txt.text, text, len + 1);
+  rr->rdata.txt.length = len;
+  return rr;
+}
+
+dns_rr_t *dns_rr_create_soa(const char *mname,
+                            const char *rname,
+                            uint32_t serial,
+                            uint32_t refresh,
+                            uint32_t retry,
+                            uint32_t expire,
+                            uint32_t minimum,
+                            uint32_t ttl) {
+  if (!mname || !rname) return NULL;
+
+  dns_rr_t *rr = dns_rr_create(DNS_TYPE_SOA, DNS_CLASS_IN, ttl);
+  if (!rr) return NULL;
+
+  dns_safe_strncpy(rr->rdata.soa.mname, mname, sizeof(rr->rdata.soa.mname));
+  dns_safe_strncpy(rr->rdata.soa.rname, rname, sizeof(rr->rdata.soa.rname));
+  rr->rdata.soa.serial  = serial;
+  rr->rdata.soa.refresh = refresh;
+  rr->rdata.soa.retry   = retry;
+  rr->rdata.soa.expire  = expire;
+  rr->rdata.soa.minimum = minimum;
+
+  return rr;
 }
 
 void dns_normalize_domain(const char *input, char *output) {

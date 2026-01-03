@@ -620,8 +620,7 @@ int dns_cache_insert(dns_cache_t *cache,
   dns_cache_entry_t *entry = calloc(1, sizeof(dns_cache_entry_t));
   if (!entry) return -1;
 
-  strncpy(entry->qname, qname, MAX_DOMAIN_NAME - 1);
-  entry->qname[MAX_DOMAIN_NAME - 1] = '\0';
+  dns_safe_strncpy(entry->qname, qname, sizeof(entry->qname));
   entry->qtype = qtype;
   entry->qclass = qclass;
   entry->entry_type = DNS_CACHE_TYPE_POSITIVE;
@@ -702,8 +701,7 @@ int dns_cache_insert_negative(dns_cache_t *cache,
   dns_cache_entry_t *entry = calloc(1, sizeof(dns_cache_entry_t));
   if (!entry) return -1;
 
-  strncpy(entry->qname, qname, MAX_DOMAIN_NAME - 1);
-  entry->qname[MAX_DOMAIN_NAME - 1] = '\0';
+  dns_safe_strncpy(entry->qname, qname, sizeof(entry->qname));
   entry->qtype = qtype;
   entry->qclass = qclass;
   entry->entry_type = type;

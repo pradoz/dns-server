@@ -77,5 +77,10 @@ bool dns_trie_is_empty(const dns_trie_t *trie);
 size_t dns_trie_get_record_count(const dns_trie_t *trie);
 const char *dns_trie_get_stats(const dns_trie_t *trie, char *buf, size_t len);
 
+bool dns_trie_insert_a(dns_trie_t *trie, const char *domain, const char *ip, uint32_t ttl);
+bool dns_trie_insert_aaaa(dns_trie_t *trie, const char *domain, const char *ip, uint32_t ttl);
+bool dns_trie_insert_ns(dns_trie_t *trie, const char *domain, const char *nsdname, uint32_t ttl);
+bool dns_trie_insert_mx(dns_trie_t *trie, const char *domain, uint16_t preference, const char *exchange, uint32_t ttl);
+
 
 #endif // DNS_TRIE_H

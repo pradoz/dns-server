@@ -62,13 +62,8 @@ int main(int argc, char *argv[]) {
   // add some default records if no zone file loaded
   if (!strlen(config->zone_file)) {
     // manual record insertion for testing
-    dns_rr_t *localhost_a = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
-    localhost_a->rdata.a.address = htonl(0x7F000001); // 127.0.0.1
-    dns_trie_insert_rr(server->trie, "localhost", localhost_a);
-
-    dns_rr_t *test_a = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
-    test_a->rdata.a.address = htonl(0xC0A80101); // 192.168.1.1
-    dns_trie_insert_rr(server->trie, "test.local", test_a);
+    dns_trie_insert_a(server->trie, "localhost", "127.0.0.1", 300);
+    dns_trie_insert_a(server->trie, "test.local", "192.168.1.1", 300);
 
     printf("Added default test records\n");
   }

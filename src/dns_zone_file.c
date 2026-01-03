@@ -25,7 +25,7 @@ zone_parser_t *zone_parser_create(const char *filename, const char *origin) {
   parser->position = 0;
   parser->at_eof = false;
 
-  strncpy(parser->curr_origin, origin, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(parser->curr_origin, origin, sizeof(parser->curr_origin));
   parser->last_name[0] = '\0';
   parser->curr_ttl = 3600; // default TTL
 
@@ -155,8 +155,7 @@ int zone_get_next_token(zone_parser_t *parser, zone_token_t *token) {
     return -1;
   }
 
-  strncpy(token->value, start, token_len);
-  token->value[token_len] = '\0';
+  dns_safe_strncpy(token->value, start, token_len + 1);
   parser->position = end - parser->curr_line;
 
   token->type = ZONE_TOKEN_NAME;
@@ -243,7 +242,7 @@ int zone_handle_directive(zone_parser_t *parser, const char *line) {
       if (!origin_start) return -1;
       while (isspace(*origin_start)) ++origin_start; // skip whitespace
 
-      strncpy(parser->curr_origin, origin_start, MAX_DOMAIN_NAME - 1);
+      dns_safe_strncpy(parser->curr_origin, origin_start, sizeof(parser->curr_origin));
 
       // remove trailing whitespace/newline/dot
       char *end = parser->curr_origin + strlen(parser->curr_origin) - 1;
@@ -310,11 +309,9 @@ static bool zone_parse_soa_record(zone_parser_t *parser,
   if (token_count < 7) return false;
 
   // parse SOA fields
-  strncpy(rr->rdata.soa.mname, tokens[0].value, MAX_DOMAIN_NAME - 1);
-  rr->rdata.soa.mname[MAX_DOMAIN_NAME - 1] = '\0';
-  strncpy(rr->rdata.soa.rname, tokens[1].value, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(rr->rdata.soa.mname, tokens[0].value, sizeof(rr->rdata.soa.mname));
+  dns_safe_strncpy(rr->rdata.soa.rname, tokens[1].value, sizeof(rr->rdata.soa.rname));
 
-  rr->rdata.soa.rname[MAX_DOMAIN_NAME - 1] = '\0';
   rr->rdata.soa.serial = (uint32_t) atol(tokens[2].value);
   rr->rdata.soa.refresh = (uint32_t) atol(tokens[3].value);
   rr->rdata.soa.retry = (uint32_t) atol(tokens[4].value);
@@ -348,8 +345,7 @@ static void zone_process_name(zone_parser_t *parser, const char *input, char *ou
   }
 
   // update last name for future empty references
-  strncpy(parser->last_name, output, MAX_DOMAIN_NAME);
-  parser->last_name[MAX_DOMAIN_NAME] = '\0';
+  dns_safe_strncpy(parser->last_name, output, sizeof(parser->last_name));
 }
 
 int zone_parse_record(zone_parser_t *parser, dns_rr_t **rr, char *owner_name) {
@@ -498,8 +494,8 @@ int zone_load_file(dns_trie_t *trie,
   if (!trie || !filename || !zone_name || !result) return -1;
 
   memset(result, 0, sizeof(zone_load_result_t));
-  strncpy(result->zone_name, zone_name, MAX_DOMAIN_NAME - 1);
-  strncpy(result->filename, filename, sizeof(result->filename) - 1);
+  dns_safe_strncpy(result->zone_name, zone_name, sizeof(result->zone_name));
+  dns_safe_strncpy(result->filename, filename, sizeof(result->filename));
   dns_error_init(&result->last_error);
 
   zone_parser_t *parser = zone_parser_create(filename, zone_name);

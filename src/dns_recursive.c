@@ -79,7 +79,7 @@ int dns_recursive_load_root_hints(dns_recursive_resolver_t *resolver) {
 
   for (int i = 0; i < DNS_ROOT_HINTS_COUNT; ++i) {
     dns_nameserver_t *server = &resolver->root_servers[i];
-    strncpy(server->name, root_servers[i][0], MAX_DOMAIN_NAME - 1);
+    dns_safe_strncpy(server->name, root_servers[i][0], sizeof(server->name));
 
     // parse IPv4 address
     if (inet_pton(AF_INET, root_servers[i][1], &server->ipv4.sin_addr) == 1) {
@@ -240,7 +240,7 @@ int dns_recursive_load_root_hints_file(dns_recursive_resolver_t *resolver, const
 
         if (!server && server_count < DNS_ROOT_HINTS_COUNT) {
           server = &resolver->root_servers[server_count++];
-          strncpy(server->name, name, MAX_DOMAIN_NAME - 1);
+          dns_safe_strncpy(server->name, name, sizeof(server->name));
         }
 
         if (server && inet_pton(AF_INET, rdata, &server->ipv4.sin_addr) == 1) {
@@ -271,7 +271,7 @@ int dns_recursive_resolve(dns_recursive_resolver_t *resolver,
   // store query context
   dns_recursive_query_t *query = &resolver->active_queries[query_id & 0xFF];
   query->query_id = query_id;
-  strncpy(query->qname, question->qname, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(query->qname, question->qname, sizeof(query->qname));
   query->qtype = question->qtype;
   query->qclass = question->qclass;
   query->start_time = time(NULL);
@@ -376,7 +376,7 @@ int dns_recursive_handle_response(dns_recursive_resolver_t *resolver,
         .qtype = query->qtype,
         .qclass = query->qclass
       };
-      strncpy(question.qname, query->qname, MAX_DOMAIN_NAME - 1);
+      dns_safe_strncpy(question.qname, query->qname, sizeof(question.qname));
 
       dns_nameserver_t *next_server = dns_recursive_select_server(&query->current_servers);
       if (next_server) {
@@ -479,8 +479,7 @@ int dns_recursive_send_error_response(dns_recursive_resolver_t *resolver,
     .qclass = query->qclass,
   };
 
-  strncpy(question.qname, query->qname, MAX_DOMAIN_NAME - 1);
-  question.qname[MAX_DOMAIN_NAME - 1] = '\0'; // ensure null terminated
+  dns_safe_strncpy(question.qname, query->qname, sizeof(question.qname));
 
   if (dns_encode_question(err_buf, sizeof(err_buf), &offset, &question) < 0) {
     return -1;

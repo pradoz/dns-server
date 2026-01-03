@@ -119,8 +119,7 @@ dns_trie_node_t *dns_trie_node_create(const char *label) {
   if (!node) return NULL;
 
   if (label) {
-    strncpy(node->label, label, MAX_LABEL_LEN);
-    node->label[MAX_LABEL_LEN] = '\0';
+    dns_safe_strncpy(node->label, label, sizeof(node->label));
   }
 
   node->children = NULL;
@@ -200,7 +199,7 @@ bool dns_trie_insert_zone(dns_trie_t *trie, const char *zone_name, dns_soa_t *so
   node->zone = calloc(1, sizeof(dns_zone_t));
   if (!node->zone) return false;
 
-  strncpy(node->zone->zone_name, zone_name, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(node->zone->zone_name, zone_name, sizeof(node->zone->zone_name));
   node->zone->soa = soa;
   node->zone->ns_records = ns_records;
   node->zone->authoritative = true;
@@ -225,7 +224,7 @@ bool dns_trie_insert_cname(dns_trie_t *trie, const char *domain, const char *tar
   node->cname = calloc(1, sizeof(dns_cname_t));
   if (!node->cname) return false;
 
-  strncpy(node->cname->cname, target, MAX_DOMAIN_NAME - 1);
+  dns_safe_strncpy(node->cname->cname, target, sizeof(node->cname->cname));
   node->cname_ttl = ttl;
 
   return true;
@@ -407,4 +406,42 @@ const char *dns_trie_get_stats(const dns_trie_t *trie, char *buf, size_t len) {
   size_t record_count = dns_trie_get_record_count(trie);
   snprintf(buf, len, "Total records: %zu", record_count);
   return buf;
+}
+
+static inline bool insert_domain_rr(dns_trie_t *trie, const char *domain, dns_rr_t *rr) {
+  if (!rr) return false;
+
+  if (!dns_trie_insert_rr(trie, domain, rr)) {
+    dns_rr_free(rr);
+    return false;
+  }
+  return true;
+}
+
+bool dns_trie_insert_a(dns_trie_t *trie, const char *domain, const char *ip, uint32_t ttl) {
+  if (!trie || !domain || !ip) return false;
+
+  dns_rr_t *rr = dns_rr_create_a_str(ip, ttl);
+  return insert_domain_rr(trie, domain, rr);
+}
+
+bool dns_trie_insert_aaaa(dns_trie_t *trie, const char *domain, const char *ip, uint32_t ttl) {
+  if (!trie || !domain || !ip) return false;
+
+  dns_rr_t *rr = dns_rr_create_aaaa_str(ip, ttl);
+  return insert_domain_rr(trie, domain, rr);
+}
+
+bool dns_trie_insert_ns(dns_trie_t *trie, const char *domain, const char *nsdname, uint32_t ttl) {
+  if (!trie || !domain || !nsdname) return false;
+
+  dns_rr_t *rr = dns_rr_create_ns(nsdname, ttl);
+  return insert_domain_rr(trie, domain, rr);
+}
+
+bool dns_trie_insert_mx(dns_trie_t *trie, const char *domain, uint16_t preference, const char *exchange, uint32_t ttl) {
+  if (!trie || !domain || !exchange) return false;
+
+  dns_rr_t *rr = dns_rr_create_mx(preference, exchange, ttl);
+  return insert_domain_rr(trie, domain, rr);
 }

@@ -52,11 +52,11 @@ int dns_server_config_load(dns_server_config_t *config, const char *config_file)
       } else if (strcmp(key, "recursion") == 0) {
         config->enable_recursion = (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0);
       } else if (strcmp(key, "root_hints") == 0) {
-        strncpy(config->root_hints_file, value, sizeof(config->root_hints_file) - 1);
+        dns_safe_strncpy(config->root_hints_file, value, sizeof(config->root_hints_file));
       } else if (strcmp(key, "zone_file") == 0) {
-        strncpy(config->zone_file, value, sizeof(config->zone_file) - 1);
+        dns_safe_strncpy(config->zone_file, value, sizeof(config->zone_file));
       } else if (strcmp(key, "forwarder") == 0 && config->upstream_count < 8) {
-        strncpy(config->upstream_servers[config->upstream_count], value, 63);
+        dns_safe_strncpy(config->upstream_servers[config->upstream_count], value, sizeof(config->upstream_servers[config->upstream_count]));
         config->upstream_count++;
       }
     }
@@ -71,7 +71,7 @@ dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
   if (!config) return dns_server_create(DNS_DEFAULT_PORT);
 
   dns_server_t *server = calloc(1, sizeof(dns_server_t));
-  if (!server) return NULL;
+  if (!server) goto err_alloc;
 
   server->socket_fd = -1;
   server->running = false;
@@ -80,26 +80,15 @@ dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
   server->enable_cache = true;
 
   server->trie = dns_trie_create();
-  if (!server->trie) {
-    free(server);
-    return NULL;
-  }
+  if (!server->trie) goto err_trie;
 
   server->cache = dns_cache_create(DNS_CACHE_DEFAULT_SIZE);
-  if (!server->cache) {
-    dns_trie_free(server->trie);
-    free(server);
-    return NULL;
-  }
+  if (!server->cache) goto err_cache;
 
   server->cache_maintainer = dns_cache_maintainer_create(server->cache, 60);
-  if (!server->cache_maintainer) {
-    dns_trie_free(server->trie);
-    dns_cache_free(server->cache);
-    free(server);
-    return NULL;
-  }
-  dns_cache_maintainer_start(server->cache_maintainer);
+  if (!server->cache_maintainer) goto err_maintainer;
+
+  if (dns_cache_maintainer_start(server->cache_maintainer) < 0) goto err_maintainer_start;
 
   // create recursive resolver
   if (config->enable_recursion) {
@@ -126,11 +115,25 @@ dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
   }
 
   return server;
+
+err_maintainer_start:
+  dns_cache_maintainer_free(server->cache_maintainer);
+  server->cache_maintainer = NULL;
+err_maintainer:
+  dns_cache_free(server->cache);
+  server->cache = NULL;
+err_cache:
+  dns_trie_free(server->trie);
+  server->trie = NULL;
+err_trie:
+  free(server);
+err_alloc:
+  return NULL;
 }
 
 dns_server_t *dns_server_create(uint16_t port) {
   dns_server_t *server = calloc(1, sizeof(dns_server_t));
-  if (!server) return NULL;
+  if (!server) goto err_alloc;
 
   server->port = port;
   server->socket_fd = -1;
@@ -139,50 +142,47 @@ dns_server_t *dns_server_create(uint16_t port) {
   server->enable_cache = true;
 
   server->trie = dns_trie_create();
-  if (!server->trie) {
-    free(server);
-    return NULL;
-  }
+  if (!server->trie) goto err_trie;
 
   server->cache = dns_cache_create(DNS_CACHE_DEFAULT_SIZE);
-  if (!server->cache) {
-    dns_trie_free(server->trie);
-    free(server);
-    return NULL;
-  }
+  if (!server->cache) goto err_cache;
 
   server->cache_maintainer = dns_cache_maintainer_create(server->cache, 60);
-  if (!server->cache_maintainer) {
-    dns_trie_free(server->trie);
-    dns_cache_free(server->cache);
-    free(server);
-    return NULL;
-  }
-  dns_cache_maintainer_start(server->cache_maintainer);
+  if (!server->cache_maintainer) goto err_maintainer;
+
+  if (dns_cache_maintainer_start(server->cache_maintainer) < 0) goto err_maintainer_start;
 
   // create and initialize recursive resolver
   server->recursive_resolver = dns_recursive_create();
   if (!server->recursive_resolver) {
-    dns_trie_free(server->trie);
-    free(server);
-    return NULL;
-  }
-
-  if (dns_recursive_init_socket(server->recursive_resolver) < 0) {
-    printf("WARNING: Failed to initialize recursive resolver socket\n");
-    server->enable_recursion = false;
+    printf("WARNING: Failed to create recursive resolver\n");
   } else {
-    // socket initialized successfully
-    server->enable_recursion = true;
-
-    // try to load root hints, disable recursion if we fail
-    if (dns_recursive_load_root_hints(server->recursive_resolver) < 0) {
-      printf("WARNING: Failed to load root hints\n");
-      server->enable_recursion = false;
+    if (dns_recursive_init_socket(server->recursive_resolver) < 0) {
+      printf("WARNING: Failed to initialize recursive resolver socket\n");
+    } else {
+      server->enable_recursion = true;
+      if (dns_recursive_load_root_hints(server->recursive_resolver) < 0) {
+        printf("WARNING: Failed to load root hints\n");
+        server->enable_recursion = false;
+      }
     }
   }
 
   return server;
+
+err_maintainer_start:
+  dns_cache_maintainer_free(server->cache_maintainer);
+  server->cache_maintainer = NULL;
+err_maintainer:
+  dns_cache_free(server->cache);
+  server->cache = NULL;
+err_cache:
+  dns_trie_free(server->trie);
+  server->trie = NULL;
+err_trie:
+  free(server);
+err_alloc:
+  return NULL;
 }
 
 void dns_server_free(dns_server_t *server) {
@@ -195,10 +195,10 @@ void dns_server_free(dns_server_t *server) {
     dns_cache_maintainer_free(server->cache_maintainer);
   }
 
+  if (server->recursive_resolver) dns_recursive_free(server->recursive_resolver);
   if (server->cache) dns_cache_free(server->cache);
+  if (server->trie) dns_trie_free(server->trie);
 
-  dns_trie_free(server->trie);
-  dns_recursive_free(server->recursive_resolver);
   free(server);
 }
 

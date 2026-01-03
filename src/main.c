@@ -91,6 +91,12 @@ int main(int argc, char *argv[]) {
   } else {
     printf("  - Recursive resolution: DISABLED\n");
   }
+  if (server->enable_cache) {
+    printf("  - DNS caching layer\n");
+    printf("  - Automatic cleanup of expired cache entries\n");
+  } else {
+    printf("  - DNS caching layer: DISABLED\n");
+  }
 
   printf("\nPress Ctrl+C to stop\n");
 
@@ -113,6 +119,18 @@ int main(int argc, char *argv[]) {
     printf("Recursive queries:      %lu\n", server->recursive_resolver->recursive_queries);
     printf("Forwarded queries:      %lu\n", server->recursive_resolver->forwarded_queries);
     printf("Failed queries:         %lu\n", server->recursive_resolver->failed_queries);
+  }
+
+  if (server->cache) {
+    printf("\n=== Cache Statistics ===\n");
+    dns_cache_print_stats(server->cache, stdout);
+
+    dns_cache_summary_t summary;
+    if (dns_cache_get_summary(server->cache, &summary) == 0) {
+      printf("\nCache Summary:\n");
+      printf("  Memory usage: %zu bytes\n", dns_cache_memory_usage(server->cache));
+      printf("  Avg TTL remaining: %u seconds\n", summary.avg_remaining_ttl);
+    }
   }
 
   dns_server_stop(server);

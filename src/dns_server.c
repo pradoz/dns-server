@@ -77,12 +77,29 @@ dns_server_t *dns_server_create_with_config(const dns_server_config_t *config) {
   server->running = false;
   server->port = config->port;
   server->enable_recursion = config->enable_recursion;
+  server->enable_cache = true;
 
   server->trie = dns_trie_create();
   if (!server->trie) {
     free(server);
     return NULL;
   }
+
+  server->cache = dns_cache_create(DNS_CACHE_DEFAULT_SIZE);
+  if (!server->cache) {
+    dns_trie_free(server->trie);
+    free(server);
+    return NULL;
+  }
+
+  server->cache_maintainer = dns_cache_maintainer_create(server->cache, 60);
+  if (!server->cache_maintainer) {
+    dns_trie_free(server->trie);
+    dns_cache_free(server->cache);
+    free(server);
+    return NULL;
+  }
+  dns_cache_maintainer_start(server->cache_maintainer);
 
   // create recursive resolver
   if (config->enable_recursion) {
@@ -119,12 +136,29 @@ dns_server_t *dns_server_create(uint16_t port) {
   server->socket_fd = -1;
   server->running = false;
   server->enable_recursion = false;
+  server->enable_cache = true;
 
   server->trie = dns_trie_create();
   if (!server->trie) {
     free(server);
     return NULL;
   }
+
+  server->cache = dns_cache_create(DNS_CACHE_DEFAULT_SIZE);
+  if (!server->cache) {
+    dns_trie_free(server->trie);
+    free(server);
+    return NULL;
+  }
+
+  server->cache_maintainer = dns_cache_maintainer_create(server->cache, 60);
+  if (!server->cache_maintainer) {
+    dns_trie_free(server->trie);
+    dns_cache_free(server->cache);
+    free(server);
+    return NULL;
+  }
+  dns_cache_maintainer_start(server->cache_maintainer);
 
   // create and initialize recursive resolver
   server->recursive_resolver = dns_recursive_create();
@@ -156,8 +190,15 @@ void dns_server_free(dns_server_t *server) {
 
   if (server->socket_fd >= 0) close(server->socket_fd);
 
+  if (server->cache_maintainer) {
+    dns_cache_maintainer_stop(server->cache_maintainer);
+    dns_cache_maintainer_free(server->cache_maintainer);
+  }
+
+  if (server->cache) dns_cache_free(server->cache);
+
   dns_trie_free(server->trie);
-  dns_recursive_free(server->recursive_resolver);  // Add this
+  dns_recursive_free(server->recursive_resolver);
   free(server);
 }
 
@@ -432,6 +473,50 @@ int dns_process_query(dns_server_t *server,
     return 0;
   }
 
+  if (server->enable_cache && server->cache) {
+    dns_cache_result_t *cache_result = dns_cache_lookup(
+        server->cache,
+        query_msg->questions[0].qname,
+        query_msg->questions[0].qtype,
+        query_msg->questions[0].qclass);
+
+    if (cache_result && cache_result->found) {
+      server->cache_hits++;
+
+      dns_resolution_result_t *resolution = dns_resolution_result_create();
+      if (resolution) {
+        if (cache_result->type == DNS_CACHE_TYPE_POSITIVE) {
+          resolution->answer_list = cache_result->records;
+          resolution->answer_count = cache_result->record_count;
+          resolution->rcode = DNS_RCODE_NOERROR;
+          cache_result->records = NULL; // transfer ownership
+        } else if (cache_result->type == DNS_CACHE_TYPE_NXDOMAIN) {
+          resolution->rcode = DNS_RCODE_NXDOMAIN;
+        } else {
+          resolution->rcode = DNS_RCODE_NOERROR;
+        }
+
+        dns_build_response(query_msg,
+                           resolution,
+                           response->buffer,
+                           response->capacity,
+                           &response->length,
+                           err);
+        dns_resolution_result_free(resolution);
+        dns_cache_result_free(cache_result);
+        dns_message_free(query_msg);
+        server->queries_processed++;
+        return 0;
+      }
+      dns_cache_result_free(cache_result);
+    } else {
+      server->cache_misses++;
+      if (cache_result) {
+        dns_cache_result_free(cache_result);
+      }
+    }
+  }
+
   // resolve query - try authoritative first
   dns_resolution_result_t *resolution = dns_resolution_result_create();
   if (!resolution) {
@@ -448,6 +533,41 @@ int dns_process_query(dns_server_t *server,
                                            &query_msg->questions[0],
                                            resolution,
                                            &resolve_err);
+
+  if (server->enable_cache && server->cache && auth_result == 0) {
+    if (resolution->rcode == DNS_RCODE_NOERROR && resolution->answer_list) {
+      uint32_t min_ttl = UINT32_MAX;
+      int count = 0;
+
+      for (dns_rr_t *rr = resolution->answer_list; rr; rr = rr->next) {
+        if (rr->ttl < min_ttl) min_ttl = rr->ttl;
+        ++count;
+      }
+
+      if (min_ttl > 0 && count > 0) {
+        dns_cache_insert(server->cache,
+                         query_msg->questions[0].qname,
+                         query_msg->questions[0].qtype,
+                         query_msg->questions[0].qclass,
+                         resolution->answer_list,
+                         count,
+                         min_ttl);
+      }
+    } else if (resolution->rcode == DNS_RCODE_NXDOMAIN) {
+      uint32_t negative_ttl = 300; // default negative TTL
+
+      if (resolution->authority_list && resolution->authority_list->type == DNS_TYPE_SOA) {
+        negative_ttl = resolution->authority_list->rdata.soa.minimum;
+      }
+      dns_cache_insert_negative(server->cache,
+                                query_msg->questions[0].qname,
+                                query_msg->questions[0].qtype,
+                                query_msg->questions[0].qclass,
+                                DNS_CACHE_TYPE_NXDOMAIN,
+                                DNS_RCODE_NXDOMAIN,
+                                negative_ttl);
+    }
+  }
 
   // check if client requested recursion
   bool try_recursion = false;

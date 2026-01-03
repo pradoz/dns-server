@@ -21,8 +21,11 @@ typedef struct {
   uint16_t port;
   dns_trie_t *trie;
   dns_recursive_resolver_t *recursive_resolver;
+  dns_cache_t *cache;
+  dns_cache_maintainer_t *cache_maintainer;
   bool running;
   bool enable_recursion;
+  bool enable_cache;
 
   // stats
   uint64_t queries_received;
@@ -31,6 +34,8 @@ typedef struct {
   uint64_t responses_sent;
   uint64_t authoritative_responses;
   uint64_t recursive_responses;
+  uint64_t cache_hits;
+  uint64_t cache_misses;
 } dns_server_t;
 
 typedef struct {

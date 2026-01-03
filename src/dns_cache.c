@@ -1,9 +1,11 @@
 #include "dns_cache.h"
+#include <bits/time.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 
@@ -109,19 +111,23 @@ void dns_cache_clear(dns_cache_t *cache) {
 
 static void *dns_cache_maintenance_thread(void *arg) {
   dns_cache_maintainer_t *maintainer = (dns_cache_maintainer_t*) arg;
+
+  pthread_mutex_lock(&maintainer->mutex);
   while (maintainer->running) {
-    sleep(maintainer->cleanup_interval_sec);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += maintainer->cleanup_interval_sec;
+
+    pthread_cond_timedwait(&maintainer->cond, &maintainer->mutex, &ts);
 
     if (!maintainer->running) break;
 
-    pthread_mutex_lock(&maintainer->mutex);
-      int removed = dns_cache_remove_expired(maintainer->cache);
-    pthread_mutex_unlock(&maintainer->mutex);
-
+    int removed = dns_cache_remove_expired(maintainer->cache);
     if (removed > 0) {
       printf("[cache maintainer] removed %d expired entries\n", removed);
     }
   }
+  pthread_mutex_unlock(&maintainer->mutex);
 
   return NULL;
 }
@@ -171,7 +177,11 @@ int dns_cache_maintainer_start(dns_cache_maintainer_t *maintainer) {
 void dns_cache_maintainer_stop(dns_cache_maintainer_t *maintainer) {
   if (!maintainer || !maintainer->running) return;
 
+  pthread_mutex_lock(&maintainer->mutex);
   maintainer->running = false;
+  pthread_cond_signal(&maintainer->cond);
+  pthread_mutex_unlock(&maintainer->mutex);
+
   pthread_join(maintainer->thread, NULL);
 }
 

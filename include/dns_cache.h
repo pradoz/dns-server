@@ -91,6 +91,7 @@ typedef struct {
   bool running;
   pthread_t thread;
   pthread_mutex_t mutex;
+  pthread_cond_t cond;
 } dns_cache_maintainer_t;
 
 typedef struct {

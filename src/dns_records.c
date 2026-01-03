@@ -4,12 +4,12 @@
 #include <string.h>
 
 
-dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t class, uint32_t ttl) {
+dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t cls, uint32_t ttl) {
   dns_rr_t *rr = calloc(1, sizeof(dns_rr_t));
   if (!rr) return NULL;
 
   rr->type = type;
-  rr->class = class;
+  rr->class = cls;
   rr->ttl = ttl;
   rr->next = NULL;
   return rr;

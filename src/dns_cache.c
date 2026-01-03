@@ -1,8 +1,10 @@
 #include "dns_cache.h"
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <strings.h>
+#include <unistd.h>
 
 
 // DJB2 hash function
@@ -105,6 +107,107 @@ void dns_cache_clear(dns_cache_t *cache) {
   cache->current_entries = 0;
 }
 
+static void *dns_cache_maintenance_thread(void *arg) {
+  dns_cache_maintainer_t *maintainer = (dns_cache_maintainer_t*) arg;
+  while (maintainer->running) {
+    sleep(maintainer->cleanup_interval_sec);
+
+    if (!maintainer->running) break;
+
+    pthread_mutex_lock(&maintainer->mutex);
+      int removed = dns_cache_remove_expired(maintainer->cache);
+    pthread_mutex_unlock(&maintainer->mutex);
+
+    if (removed > 0) {
+      printf("[cache maintainer] removed %d expired entries\n", removed);
+    }
+  }
+
+  return NULL;
+}
+
+dns_cache_maintainer_t *dns_cache_maintainer_create(dns_cache_t *cache, int interval_sec) {
+  if (!cache || interval_sec <= 0) return NULL;
+
+  dns_cache_maintainer_t *maintainer = calloc(1, sizeof(dns_cache_maintainer_t));
+  if (!maintainer) return NULL;
+
+  maintainer->cache = cache;
+  maintainer->cleanup_interval_sec = interval_sec;
+  maintainer->running = false;
+
+  if (pthread_mutex_init(&maintainer->mutex, NULL) != 0) {
+    free(maintainer);
+    return NULL;
+  }
+
+  return maintainer;
+}
+
+void dns_cache_maintainer_free(dns_cache_maintainer_t *maintainer) {
+  if (!maintainer) return;
+  if (maintainer->running) dns_cache_maintainer_stop(maintainer);
+
+  pthread_mutex_destroy(&maintainer->mutex);
+  free(maintainer);
+}
+
+int dns_cache_maintainer_start(dns_cache_maintainer_t *maintainer) {
+  if (!maintainer || maintainer->running) return -1;
+
+  maintainer->running = true;
+
+  if (pthread_create(&maintainer->thread,
+                     NULL,
+                     dns_cache_maintenance_thread,
+                     maintainer) != 0) {
+    maintainer->running = false;
+    return -1;
+  }
+
+  return 0;
+}
+
+void dns_cache_maintainer_stop(dns_cache_maintainer_t *maintainer) {
+  if (!maintainer || !maintainer->running) return;
+
+  maintainer->running = false;
+  pthread_join(maintainer->thread, NULL);
+}
+
+int dns_cache_insert_safe(dns_cache_t *cache,
+                          pthread_mutex_t *mutex,
+                          const char *qname,
+                          dns_record_type_t qtype,
+                          dns_class_t qclass,
+                          const dns_rr_t *records,
+                          int record_count,
+                          uint32_t ttl) {
+  if (!mutex) {
+    return dns_cache_insert(cache, qname, qtype, qclass, records, record_count, ttl);
+  }
+
+  pthread_mutex_lock(mutex);
+    int result = dns_cache_insert(cache, qname, qtype, qclass, records, record_count, ttl);
+  pthread_mutex_unlock(mutex);
+
+  return result;
+}
+
+dns_cache_result_t *dns_cache_lookup_safe(dns_cache_t *cache,
+                          pthread_mutex_t *mutex,
+                          const char *qname,
+                          dns_record_type_t qtype,
+                          dns_class_t qclass) {
+  if (!mutex) return dns_cache_lookup(cache, qname, qtype, qclass);
+
+  pthread_mutex_lock(mutex);
+    dns_cache_result_t *result = dns_cache_lookup(cache, qname, qtype, qclass);
+  pthread_mutex_unlock(mutex);
+
+  return result;
+}
+
 const dns_cache_stats_t *dns_cache_get_stats(const dns_cache_t *cache) {
   return cache ? &cache->stats : NULL;
 }
@@ -144,6 +247,129 @@ void dns_cache_print_stats(const dns_cache_t *cache, FILE *output) {
 float dns_cache_hit_rate(const dns_cache_t *cache) {
   if (!cache || cache->stats.queries == 0) return 0.0f;
   return (cache->stats.hits * 100.0f) / cache->stats.queries;
+}
+
+int dns_cache_get_summary(const dns_cache_t *cache, dns_cache_summary_t *summary) {
+  if (!cache || !summary) return -1;
+
+  memset(summary, 0, sizeof(dns_cache_summary_t));
+
+  summary->current_entries = cache->current_entries;
+  summary->max_entries = cache->max_entries;
+  summary->utilization_pct = (cache->current_entries * 100.0) / cache->max_entries;
+  summary->hit_rate_pct = dns_cache_hit_rate(cache);
+  summary->total_queries = cache->stats.queries;
+
+
+  time_t now = time(NULL);
+  time_t oldest = 0;
+  time_t newest = now;
+
+  uint64_t total_remaining_ttl = 0;
+  int entry_count = 0;
+
+  for (int i = 0; i < DNS_CACHE_HASH_SIZE; ++i) {
+    dns_cache_entry_t *entry = cache->hash_table[i];
+    while (entry) {
+      if (entry->entry_type == DNS_CACHE_TYPE_POSITIVE) {
+        summary->positive_entries++;
+      } else {
+        summary->negative_entries++;
+      }
+
+      // update oldest/newest
+      time_t age = now - entry->timestamp;
+      if (oldest == 0 || age > oldest) oldest = age;
+      if (age < newest) newest = age;
+
+      if (entry->expiration > now) total_remaining_ttl += (entry->expiration - now);
+
+      ++entry_count;
+      entry = entry->next;
+    }
+  }
+
+  summary->oldest_entry_age = oldest;
+  summary->newest_entry_age = newest;
+  summary->avg_remaining_ttl = entry_count > 0 ? (uint32_t)(total_remaining_ttl / entry_count) : 0;
+
+  return 0;
+}
+
+size_t dns_cache_memory_usage(const dns_cache_t *cache) {
+  if (!cache) return 0;
+
+  size_t total = sizeof(dns_cache_t);
+
+  for (int i = 0; i < DNS_CACHE_HASH_SIZE; ++i) {
+    dns_cache_entry_t *entry = cache->hash_table[i];
+    while (entry) {
+      total += sizeof(dns_cache_entry_t);
+
+      if (entry->entry_type == DNS_CACHE_TYPE_POSITIVE) {
+        for (dns_rr_t *rr = entry->records; rr != NULL; rr = rr->next) {
+          total += sizeof(dns_rr_t);
+          if (rr->type == DNS_TYPE_TXT && rr->rdata.txt.text) {
+            total += rr->rdata.txt.length;
+          }
+        }
+      }
+
+      entry = entry->next;
+    }
+  }
+
+  return total;
+}
+
+int dns_cache_dump_entries(const dns_cache_t *cache, FILE *output, int max_entries) {
+  if (!cache || !output) return -1;
+
+  int count = 0;
+  time_t now = time(NULL);
+
+  fprintf(output, "%-40s %-6s %-8s %-10s %-10s\n",
+          "QNAME", "TYPE", "CLASS", "TTL_LEFT", "STATUS");
+  fprintf(output, "%-40s %-6s %-8s %-10s %-10s\n",
+          "----------------------------------------", "------", "--------", "----------", "----------");
+
+  for (int i = 0; i < DNS_CACHE_HASH_SIZE && (max_entries <= 0 || count < max_entries); ++i) {
+    dns_cache_entry_t *entry = cache->hash_table[i];
+
+    while (entry && (max_entries <= 0 || count < max_entries)) {
+      const char *type_str;
+      switch (entry->qtype) {
+        case DNS_TYPE_A: type_str = "A"; break;
+        case DNS_TYPE_AAAA: type_str = "AAAA"; break;
+        case DNS_TYPE_NS: type_str = "NS"; break;
+        case DNS_TYPE_CNAME: type_str = "CNAME"; break;
+        case DNS_TYPE_MX: type_str = "MX"; break;
+        case DNS_TYPE_SOA: type_str = "SOA"; break;
+        case DNS_TYPE_TXT: type_str = "TXT"; break;
+        default: type_str = "UNSUPPORTED";
+      }
+
+      const char *status;
+      switch (entry->entry_type) {
+        case DNS_CACHE_TYPE_POSITIVE: status = "POSITIVE"; break;
+        case DNS_CACHE_TYPE_NXDOMAIN: status = "NXDOMAIN"; break;
+        case DNS_CACHE_TYPE_NODATA: status = "NODATA"; break;
+        default: status = "UNKNOWN";
+      }
+
+      int32_t ttl_left = (int32_t)(entry->expiration - now);
+      if (ttl_left < 0) ttl_left = 0;
+
+      fprintf(output, "%-40s %-6s %-8s %-10d %-10s\n",
+              entry->qname, type_str, "IN", ttl_left, status);
+
+      ++count;
+      entry = entry->next;
+
+    }
+  }
+
+  return count;
 }
 
 void dns_cache_set_ttl_limits(dns_cache_t *cache, uint32_t min_ttl, uint32_t max_ttl) {

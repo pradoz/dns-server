@@ -4,6 +4,7 @@
 #include "dns_trie.h"
 #include "dns_error.h"
 #include <arpa/inet.h>
+#include <stdio.h>
 #include <unistd.h>
 
 
@@ -661,6 +662,105 @@ static MunitResult test_backward_compatibility(const MunitParameter params[], vo
   return MUNIT_OK;
 }
 
+static MunitResult test_cache_summary(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(100);
+  munit_assert_not_null(cache);
+
+  dns_rr_t *record = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
+  record->rdata.a.address = inet_addr("192.168.1.1");
+  dns_cache_insert(cache, "example.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 300);
+  dns_rr_free(record);
+
+  dns_cache_insert_negative(cache, "notfound.com", DNS_TYPE_A, DNS_CLASS_IN, DNS_CACHE_TYPE_NXDOMAIN, DNS_RCODE_NXDOMAIN, 300);
+
+  dns_cache_summary_t summary;
+  int result = dns_cache_get_summary(cache, &summary);
+
+  munit_assert_int(result, ==, 0);
+  munit_assert_size(summary.current_entries, ==, 2);
+  munit_assert_size(summary.positive_entries, ==, 1);
+  munit_assert_size(summary.negative_entries, ==, 1);
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_cache_memory_usage(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(100);
+  munit_assert_not_null(cache);
+
+  size_t start_mem_usage = dns_cache_memory_usage(cache);
+  munit_assert_size(start_mem_usage, >, 0);
+
+  dns_rr_t *record = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
+  record->rdata.a.address = inet_addr("192.168.1.1");
+  dns_cache_insert(cache, "example.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 300);
+  dns_rr_free(record);
+
+  size_t end_mem_usage = dns_cache_memory_usage(cache);
+  munit_assert_size(end_mem_usage, >, start_mem_usage);
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_cache_dump(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(100);
+  munit_assert_not_null(cache);
+
+  dns_rr_t *record = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
+  record->rdata.a.address = inet_addr("192.168.1.1");
+  dns_cache_insert(cache, "example.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 300);
+  dns_rr_free(record);
+
+  FILE *tmp = tmpfile();
+  munit_assert_not_null(tmp);
+
+  int count = dns_cache_dump_entries(cache, tmp, 10);
+  munit_assert_int(count, ==, 1);
+
+  fclose(tmp);
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_cache_maintainer(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(100);
+  munit_assert_not_null(cache);
+
+  dns_cache_maintainer_t *maintainer = dns_cache_maintainer_create(cache, 1);
+  munit_assert_not_null(maintainer);
+
+  // TTL=1
+  dns_rr_t *record = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 1);
+  record->rdata.a.address = inet_addr("192.168.1.1");
+  dns_cache_insert(cache, "example.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 1);
+  dns_rr_free(record);
+
+  munit_assert_size(cache->current_entries, ==, 1);
+
+  int result = dns_cache_maintainer_start(maintainer);
+  munit_assert_int(result, ==, 0);
+
+  sleep(2);
+
+  munit_assert_size(cache->current_entries, ==, 0);
+
+  dns_cache_maintainer_stop(maintainer);
+  dns_cache_maintainer_free(maintainer);
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
 
 static MunitTest tests[] = {
   {"/operations/create", test_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -685,6 +785,10 @@ static MunitTest tests[] = {
   {"/resolver/cache_disabled", test_cache_disabled, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/resolver/cache_expiration", test_cache_expiration, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/resolver/backward_compat", test_backward_compatibility, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/monitoring/summary", test_cache_summary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/monitoring/memory_usage", test_cache_memory_usage, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/monitoring/dump", test_cache_dump, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/maintenance/maintainer", test_cache_maintainer, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 

@@ -111,7 +111,7 @@ static inline void dns_safe_strncpy(char *dest, const char *src, size_t dest_siz
   dest[dest_size - 1] = '\0';
 }
 
-dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t class, uint32_t ttl);
+dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t cls, uint32_t ttl);
 void dns_rr_free(dns_rr_t *rr);
 dns_rrset_t *dns_rrset_create(dns_record_type_t type, uint32_t ttl);
 void dns_rrset_free(dns_rrset_t *rrset);

@@ -35,7 +35,7 @@ enable_testing()
 
 # test executables
 add_executable(test_dns_trie test/test_dns_trie.c test/munit/munit.c)
-target_link_libraries(test_dns_trie dns_lib)
+target_link_libraries(test_dns_trie dns_lib pthread)
 target_include_directories(test_dns_trie PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -43,7 +43,7 @@ target_include_directories(test_dns_trie PRIVATE
 add_test(NAME test_dns_trie COMMAND test_dns_trie)
 
 add_executable(test_dns_records test/test_dns_records.c test/munit/munit.c)
-target_link_libraries(test_dns_records dns_lib)
+target_link_libraries(test_dns_records dns_lib pthread)
 target_include_directories(test_dns_records PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -51,7 +51,7 @@ target_include_directories(test_dns_records PRIVATE
 add_test(NAME test_dns_records COMMAND test_dns_records)
 
 add_executable(test_dns_parser test/test_dns_parser.c test/munit/munit.c)
-target_link_libraries(test_dns_parser dns_lib)
+target_link_libraries(test_dns_parser dns_lib pthread)
 target_include_directories(test_dns_parser PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -59,7 +59,7 @@ target_include_directories(test_dns_parser PRIVATE
 add_test(NAME test_dns_parser COMMAND test_dns_parser)
 
 add_executable(test_dns_resolver test/test_dns_resolver.c test/munit/munit.c)
-target_link_libraries(test_dns_resolver dns_lib)
+target_link_libraries(test_dns_resolver dns_lib pthread)
 target_include_directories(test_dns_resolver PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -67,7 +67,7 @@ target_include_directories(test_dns_resolver PRIVATE
 add_test(NAME test_dns_resolver COMMAND test_dns_resolver)
 
 add_executable(test_dns_server test/test_dns_server.c test/munit/munit.c)
-target_link_libraries(test_dns_server dns_lib)
+target_link_libraries(test_dns_server dns_lib pthread)
 target_include_directories(test_dns_server PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -75,7 +75,7 @@ target_include_directories(test_dns_server PRIVATE
 add_test(NAME test_dns_server COMMAND test_dns_server)
 
 add_executable(test_dns_zone_file test/test_dns_zone_file.c test/munit/munit.c)
-target_link_libraries(test_dns_zone_file dns_lib)
+target_link_libraries(test_dns_zone_file dns_lib pthread)
 target_include_directories(test_dns_zone_file PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -83,7 +83,7 @@ target_include_directories(test_dns_zone_file PRIVATE
 add_test(NAME test_dns_zone_file COMMAND test_dns_zone_file)
 
 add_executable(test_dns_recursive test/test_dns_recursive.c test/munit/munit.c)
-target_link_libraries(test_dns_recursive dns_lib)
+target_link_libraries(test_dns_recursive dns_lib pthread)
 target_include_directories(test_dns_recursive PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -91,7 +91,7 @@ target_include_directories(test_dns_recursive PRIVATE
 add_test(NAME test_dns_recursive COMMAND test_dns_recursive)
 
 add_executable(test_dns_bugs test/test_dns_bugs.c test/munit/munit.c)
-target_link_libraries(test_dns_bugs dns_lib)
+target_link_libraries(test_dns_bugs dns_lib pthread)
 target_include_directories(test_dns_bugs PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit
@@ -99,7 +99,7 @@ target_include_directories(test_dns_bugs PRIVATE
 add_test(NAME test_dns_bugs COMMAND test_dns_bugs)
 
 add_executable(test_dns_cache test/test_dns_cache.c test/munit/munit.c)
-target_link_libraries(test_dns_cache dns_lib)
+target_link_libraries(test_dns_cache dns_lib pthread)
 target_include_directories(test_dns_cache PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/test/munit

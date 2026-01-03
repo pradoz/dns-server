@@ -1,5 +1,8 @@
 #include "munit.h"
 #include "dns_cache.h"
+#include "dns_resolver.h"
+#include "dns_trie.h"
+#include "dns_error.h"
 #include <arpa/inet.h>
 #include <unistd.h>
 

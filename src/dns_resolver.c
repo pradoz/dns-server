@@ -317,6 +317,8 @@ static bool dns_resolver_cache_lookup(dns_resolver_t *resolver,
     return false;
   }
 
+  resolver->cache_hits++;
+
   if (cache_result->type == DNS_CACHE_TYPE_POSITIVE) {
     result->answer_list = cache_result->records;
     result->answer_count = cache_result->record_count;
@@ -325,10 +327,10 @@ static bool dns_resolver_cache_lookup(dns_resolver_t *resolver,
     cache_result->records = NULL; // prevent double-free
   } else if (cache_result->type == DNS_CACHE_TYPE_NXDOMAIN) {
     result->rcode = DNS_RCODE_NXDOMAIN;
-    result->answer_code = 0;
+    result->answer_count = 0;
   } else {
     result->rcode = DNS_RCODE_NOERROR;
-    result->answer_code = 0;
+    result->answer_count = 0;
   }
 
   dns_cache_result_free(cache_result);
@@ -342,6 +344,13 @@ dns_resolver_t *dns_resolver_create(void) {
   resolver->trie = dns_trie_create();
   if (!resolver->trie) {
     dns_trie_free(resolver->trie);
+    free(resolver);
+    return NULL;
+  }
+
+  resolver->cache = dns_cache_create(DNS_CACHE_DEFAULT_SIZE);
+  if (!resolver->cache) {
+    dns_cache_free(resolver->cache);
     free(resolver);
     return NULL;
   }

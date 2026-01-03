@@ -105,10 +105,32 @@ typedef struct {
   size_t count;
 } dns_rrset_t;
 
-static inline void dns_safe_strncpy(char *dest, const char *src, size_t dest_size) {
-  if (!dest || !src || dest_size == 0) return;
-  strncpy(dest, src, dest_size - 1);
-  dest[dest_size - 1] = '\0';
+static inline void dns_safe_strncpy(char *dst, const char *src, size_t dst_size) {
+  if (!dst || dst_size == 0) return;
+  if (!src) {
+    dst[0] = '\0';
+    return;
+  }
+
+  size_t i;
+  for (i = 0; i < dst_size - 1 && src[i] != '\0'; ++i) {
+    dst[i] = src[i];
+  }
+  dst[i] = '\0';
+}
+
+static inline int dns_safe_strncpy_check(char *dst, const char *src, size_t dst_size) {
+  if (!dst || dst_size == 0) return -1;
+  if (!src) {
+    dst[0] = '\0';
+    return 0;
+  }
+
+  size_t src_len = strlen(src);
+  size_t copy_len = (src_len < dst_size - 1) ? src_len : dst_size - 1;
+  memcpy(dst, src, copy_len);
+  dst[copy_len] = '\0';
+  return (src_len >= dst_size) ? -1 : (int)copy_len;
 }
 
 dns_rr_t *dns_rr_create(dns_record_type_t type, dns_class_t cls, uint32_t ttl);
@@ -116,6 +138,24 @@ void dns_rr_free(dns_rr_t *rr);
 dns_rrset_t *dns_rrset_create(dns_record_type_t type, uint32_t ttl);
 void dns_rrset_free(dns_rrset_t *rrset);
 bool dns_rrset_add(dns_rrset_t *rrset, dns_rr_t *rr);
+
+dns_rr_t *dns_rr_create_a(uint32_t address, uint32_t ttl);
+dns_rr_t *dns_rr_create_a_str(const char *ip_str, uint32_t ttl);
+dns_rr_t *dns_rr_create_aaaa(const uint8_t address[16], uint32_t ttl);
+dns_rr_t *dns_rr_create_aaaa_str(const char *ip_str, uint32_t ttl);
+dns_rr_t *dns_rr_create_ns(const char *nsdname, uint32_t ttl);
+dns_rr_t *dns_rr_create_cname(const char *cname, uint32_t ttl);
+dns_rr_t *dns_rr_create_mx(uint16_t preference, const char *exchange, uint32_t ttl);
+dns_rr_t *dns_rr_create_txt(const char *text, uint32_t ttl);
+dns_rr_t *dns_rr_create_soa(const char *mname,
+                            const char *rname,
+                            uint32_t serial,
+                            uint32_t refresh,
+                            uint32_t retry,
+                            uint32_t expire,
+                            uint32_t minimum,
+                            uint32_t ttl);
+
 void dns_normalize_domain(const char *input, char *output);
 bool dns_is_subdomain(const char *domain, const char *parent);
 

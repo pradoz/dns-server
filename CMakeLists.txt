@@ -17,6 +17,7 @@ set(LIB_SOURCES
   src/dns_zone_file.c
   src/dns_recursive.c
   src/dns_cache.c
+  src/dns_log.c
 )
 
 # main executable sources
@@ -105,3 +106,11 @@ target_include_directories(test_dns_cache PRIVATE
   ${CMAKE_SOURCE_DIR}/test/munit
 )
 add_test(NAME test_dns_cache COMMAND test_dns_cache)
+
+add_executable(test_dns_log test/test_dns_log.c test/munit/munit.c)
+target_link_libraries(test_dns_log dns_lib pthread)
+target_include_directories(test_dns_log PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  ${CMAKE_SOURCE_DIR}/test/munit
+)
+add_test(NAME test_dns_log COMMAND test_dns_log)

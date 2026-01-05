@@ -1,5 +1,6 @@
 #include "munit.h"
 #include "dns_parser.h"
+#include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
 
@@ -108,7 +109,7 @@ static MunitResult test_rr_encoding(const MunitParameter params[], void *data) {
   size_t offset = 0;
   int result;
 
-  // A record
+  // a record
   dns_rr_t a_record = {
     .type = DNS_TYPE_A,
     .class = DNS_CLASS_IN,
@@ -121,7 +122,7 @@ static MunitResult test_rr_encoding(const MunitParameter params[], void *data) {
   munit_assert_int(result, ==, 0);
   munit_assert_int(offset, >, 0);
 
-  // CNAME  record
+  // cNAME  record
   offset = 0;
   dns_rr_t cname_record = {
     .type = DNS_TYPE_CNAME,
@@ -134,7 +135,7 @@ static MunitResult test_rr_encoding(const MunitParameter params[], void *data) {
   munit_assert_int(result, ==, 0);
   munit_assert_int(offset, >, 0);
 
-  // AAAA record
+  // aAAA record
   offset = 0;
   dns_rr_t aaaa_record = {
     .type = DNS_TYPE_AAAA,
@@ -142,7 +143,7 @@ static MunitResult test_rr_encoding(const MunitParameter params[], void *data) {
     .ttl = 7200,
   };
 
-  // IPv6 address: 2001:4860:4860::8888
+  // iPv6 address: 2001:4860:4860::8888
   uint8_t ipv6_addr[16] = {0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00,
                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88};
   memcpy(aaaa_record.rdata.aaaa.address, ipv6_addr, 16);
@@ -151,7 +152,7 @@ static MunitResult test_rr_encoding(const MunitParameter params[], void *data) {
   munit_assert_int(result, ==, 0);
   munit_assert_int(offset, >, 0);
 
-  // NS record
+  // nS record
   offset = 0;
   dns_rr_t ns_record = {
     .type = DNS_TYPE_NS,
@@ -205,7 +206,7 @@ static MunitResult test_rr_encoding_manual_verify(const MunitParameter params[],
   // [4]test[3]com[0] = 10 bytes for name
   // type (2 bytes) + class (2 bytes) + ttl (4 bytes) + rdlength (2 bytes) = 10 bytes
   // rdata (4 bytes for A record) = 4 bytes
-  // Total expected: 10 + 10 + 4 = 24 bytes
+  // total expected: 10 + 10 + 4 = 24 bytes
 
   munit_assert_int(offset, ==, 24);
 
@@ -274,7 +275,7 @@ static MunitResult test_error_response_helper(const MunitParameter params[], voi
   uint8_t buffer[512];
   uint16_t query_id = 0xABCD;
 
-  // NULL buffer
+  // nULL buffer
   int result = dns_build_error_response_header(NULL,
                                            sizeof(buffer),
                                            query_id,
@@ -291,7 +292,7 @@ static MunitResult test_error_response_helper(const MunitParameter params[], voi
                                            false);
   munit_assert_int(result, ==, -1);
 
-  // NOTIMP without question
+  // nOTIMP without question
   result = dns_build_error_response_header(buffer,
                                                sizeof(buffer),
                                                query_id,
@@ -307,7 +308,7 @@ static MunitResult test_error_response_helper(const MunitParameter params[], voi
   munit_assert_int(decoded.qdcount, ==, 0);
   munit_assert_int(decoded.ancount, ==, 0);
 
-  // FORMERR with question
+  // fORMERR with question
   result = dns_build_error_response_header(buffer,
                                            sizeof(buffer),
                                            query_id,
@@ -322,7 +323,7 @@ static MunitResult test_error_response_helper(const MunitParameter params[], voi
   return MUNIT_OK;
 }
 
-static MunitResult test_parse_name_boundary_conditions(const MunitParameter params[], void *data) {
+static MunitResult test_name_boundary_conditions(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -372,10 +373,10 @@ static MunitResult test_response_summary(const MunitParameter params[], void *da
   uint8_t mock_response[] = {
     // header: ID=0x1234, QR=1, RCODE=0
     0x12, 0x34, 0x81, 0x80,
-    0x00, 0x01, // QDCOUNT = 1
-    0x00, 0x02, // ANCOUNT = 2
-    0x00, 0x01, // NSCOUNT = 1
-    0x00, 0x03, // ARCOUNT = 3
+    0x00, 0x01, // qDCOUNT = 1
+    0x00, 0x02, // aNCOUNT = 2
+    0x00, 0x01, // nSCOUNT = 1
+    0x00, 0x03, // aRCOUNT = 3
   };
 
   dns_response_summary_t summary;
@@ -394,11 +395,11 @@ static MunitResult test_response_summary(const MunitParameter params[], void *da
   result = dns_parse_response_summary(mock_response, 8, &summary);
   munit_assert_int(result, ==, -1);
 
-  // NULL buffer
+  // nULL buffer
   result = dns_parse_response_summary(NULL, sizeof(mock_response), &summary);
   munit_assert_int(result, ==, -1);
 
-  // NULL summary
+  // nULL summary
   result = dns_parse_response_summary(mock_response, sizeof(mock_response), NULL);
   munit_assert_int(result, ==, -1);
 
@@ -506,7 +507,166 @@ static MunitResult test_soa_rr_encoding(const MunitParameter params[], void *dat
 
   int result = dns_encode_rr(buf, sizeof(buf), &offset, "example.com", &soa_record);
   munit_assert_int(result, ==, 0);
-  munit_assert_size(offset, >, 50); // SOA records are large
+  munit_assert_size(offset, >, 50); // sOA records are large
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_empty_packet(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_header_t header;
+
+  int result = dns_parse_header(NULL, 0, &header);
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_truncated_header(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // only 8 bytes when 12 are required
+  uint8_t truncated[] = {0x12, 0x34, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00};
+  dns_header_t header;
+
+  int result = dns_parse_header(truncated, sizeof(truncated), &header);
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_compression_pointer_loop(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // packet with compression pointer pointing to itself
+  uint8_t loop_packet[] = {
+    // header
+    0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // name with compression pointer to itself at offset 12
+    0xC0, 0x0C
+  };
+
+  size_t offset = 12;
+  char name[MAX_DOMAIN_NAME];
+
+  int result = dns_parse_name(loop_packet, sizeof(loop_packet), &offset, name, sizeof(name));
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_compression_pointer_forward(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // compression pointer pointing forward (invalid)
+  uint8_t forward_ptr[] = {
+    // header
+    0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // compression pointer after the packet at offset 20 (ends at 12)
+    0xC0, 0x14
+  };
+
+  size_t offset = 12;
+  char name[MAX_DOMAIN_NAME];
+
+  int result = dns_parse_name(forward_ptr, sizeof(forward_ptr), &offset, name, sizeof(name));
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_label_too_long(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t long_label[80] = {
+    // header
+    0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // label length 64 (max is 63)
+    0x40
+  };
+  // fill with 'a's
+  memset(long_label + 13, 'a', 64);
+  long_label[77] = 0x00;  // end of name
+
+  size_t offset = 12;
+  char name[MAX_DOMAIN_NAME];
+
+  int result = dns_parse_name(long_label, sizeof(long_label), &offset, name, sizeof(name));
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_name_too_long(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // build a packet with name > 255 chars (using multiple 63-char labels)
+  uint8_t long_name_packet[400];
+  memset(long_name_packet, 0, sizeof(long_name_packet));
+
+  // header
+  memcpy(long_name_packet, "\x12\x34\x81\x80\x00\x01\x00\x00\x00\x00\x00\x00", 12);
+
+  size_t pos = 12;
+  // 5 labels of 63 chars each = 315 chars (too long)
+  for (int i = 0; i < 5 && pos < sizeof(long_name_packet) - 70; i++) {
+    long_name_packet[pos++] = 63;  // label length
+    memset(long_name_packet + pos, 'a', 63);
+    pos += 63;
+  }
+  long_name_packet[pos++] = 0;  // end of name
+
+  size_t offset = 12;
+  char name[MAX_DOMAIN_NAME];
+
+  int result = dns_parse_name(long_name_packet, pos, &offset, name, sizeof(name));
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_encode_name_boundary(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t buffer[256];
+  size_t offset;
+
+  // exactly 63-char label
+  char label_63[64];
+  memset(label_63, 'a', 63);
+  label_63[63] = '\0';
+
+  char domain_63[80];
+  snprintf(domain_63, sizeof(domain_63), "%s.com", label_63);
+
+  offset = 0;
+  int result = dns_encode_name(buffer, sizeof(buffer), &offset, domain_63);
+  munit_assert_int(result, ==, 0);
+
+  // 64-char label - should fail
+  char label_64[65];
+  memset(label_64, 'a', 64);
+  label_64[64] = '\0';
+
+  char domain_64[80];
+  snprintf(domain_64, sizeof(domain_64), "%s.com", label_64);
+
+  offset = 0;
+  result = dns_encode_name(buffer, sizeof(buffer), &offset, domain_64);
+  munit_assert_int(result, ==, -1);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_encode_buffer_too_small(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  uint8_t small_buffer[5];
+  size_t offset = 0;
+
+  int result = dns_encode_name(small_buffer, sizeof(small_buffer), &offset, "example.com");
+  munit_assert_int(result, ==, -1);
 
   return MUNIT_OK;
 }
@@ -519,13 +679,21 @@ static MunitTest tests[] = {
   {"/rr_encoding_manual_verify", test_rr_encoding_manual_verify, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/full_packet_query", test_full_packet_query, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/error_response_helper", test_error_response_helper, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/name_boundary", test_parse_name_boundary_conditions, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/name_boundary", test_name_boundary_conditions, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/response_summary", test_response_summary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/write_uint16", test_write_uint16, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/read_uint16", test_read_uint16, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/write_uint32", test_write_uint32, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/read_uint32", test_read_uint32, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/soa_rr_encoding", test_soa_rr_encoding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/empty_packet", test_empty_packet, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/truncated_header", test_truncated_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/compression_pointer_loop", test_compression_pointer_loop, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/compression_pointer_forward", test_compression_pointer_forward, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/label_too_long", test_label_too_long, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/name_too_long", test_name_too_long, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/encode_name_boundary", test_encode_name_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/encode_buffer_too_small", test_encode_buffer_too_small, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
 
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };

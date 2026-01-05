@@ -8,8 +8,8 @@
 
 
 static char *create_test_file(const char *content) {
-  static char temp_filename[] = "/tmp/test_XXXXXX";
-  int fd = mkstemp(temp_filename);
+  static char temp_fname[] = "/tmp/test_XXXXXX";
+  int fd = mkstemp(temp_fname);
   if (fd == -1) return NULL;
 
   FILE *f = fdopen(fd, "w");
@@ -21,12 +21,12 @@ static char *create_test_file(const char *content) {
   fprintf(f, "%s", content);
   fclose(f);
 
-  return temp_filename;
+  return temp_fname;
 }
 
-static void cleanup_test_file(const char *filename) {
-  if (filename) {
-    unlink(filename);
+static void cleanup_test_file(const char *fname) {
+  if (fname) {
+    unlink(fname);
   }
 }
 
@@ -34,20 +34,20 @@ static MunitResult test_parser_create(const MunitParameter params[], void *data)
   (void)params;
   (void)data;
 
-  const char *zone_content =
+  const char *content =
     "; Simple test zone\n"
     "example.com.  IN  SOA  ns1.example.com. admin.example.com. 1 3600 600 86400 300\n"
     "example.com.  IN  NS   ns1.example.com.\n"
     "www           IN  A    192.168.1.1\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(content);
+  munit_assert_not_null(fname);
 
-  zone_parser_t *parser = zone_parser_create(filename, "example.com");
+  zone_parser_t *parser = zone_parser_create(fname, "example.com");
   munit_assert_not_null(parser);
 
   zone_parser_free(parser);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -61,13 +61,13 @@ static MunitResult test_load_simple(const MunitParameter params[], void *data) {
     "mail.example.com. 300  IN  A    192.168.1.2\n"
     "ftp.example.com.  300  IN  A    192.168.1.3\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.errors_encountered, ==, 0);
@@ -86,7 +86,7 @@ static MunitResult test_load_simple(const MunitParameter params[], void *data) {
   munit_assert_not_null(ftp);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -101,19 +101,19 @@ static MunitResult test_load_with_comments(const MunitParameter params[], void *
     "; Another comment\n"
     "mail.example.com. 300  IN  A    192.168.1.2\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 2);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -146,9 +146,9 @@ static MunitResult test_backward_compatibility(const MunitParameter params[], vo
 
   // load zone file (new way)
   const char *zone_content = "auto.example.com. 300 IN A 10.0.0.2\n";
-  char *filename = create_test_file(zone_content);
+  char *fname = create_test_file(zone_content);
   zone_load_result_t result;
-  zone_load_file(trie, filename, "example.com", &result);
+  zone_load_file(trie, fname, "example.com", &result);
 
   // verify both records exist
   dns_rrset_t *manual = dns_trie_lookup(trie, "manual.example.com", DNS_TYPE_A);
@@ -160,7 +160,7 @@ static MunitResult test_backward_compatibility(const MunitParameter params[], vo
   munit_assert_int(auto_rec->records->rdata.a.address, ==, inet_addr("10.0.0.2"));
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -174,13 +174,13 @@ static MunitResult test_soa_parsing(const MunitParameter params[], void *data) {
     "$ORIGIN example.com.\n"
     "@  IN  SOA  ns1.example.com. admin.example.com. 2024010101 3600 600 86400 300\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 1);
@@ -193,7 +193,7 @@ static MunitResult test_soa_parsing(const MunitParameter params[], void *data) {
   munit_assert_int(soa_rrset->records->rdata.soa.serial, ==, 2024010101);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -208,13 +208,13 @@ static MunitResult test_directives(const MunitParameter params[], void *data) {
     "www  IN  A    192.168.1.1\n"
     "mail IN  A    192.168.1.2\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 2);
@@ -225,7 +225,7 @@ static MunitResult test_directives(const MunitParameter params[], void *data) {
   munit_assert_int(www->records->ttl, ==, 7200);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -238,13 +238,13 @@ static MunitResult test_mx_records(const MunitParameter params[], void *data) {
     "example.com. 300 IN MX 10 mail.example.com.\n"
     "example.com. 300 IN MX 20 backup.example.com.\n";
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 2);
@@ -255,7 +255,7 @@ static MunitResult test_mx_records(const MunitParameter params[], void *data) {
   munit_assert_int(mx_rrset->count, ==, 2);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -270,13 +270,13 @@ static MunitResult test_relative_names(const MunitParameter params[], void *data
     "www   IN  A    192.168.1.1\n"  // www = www.example.com
     "      IN  AAAA 2001:db8::1\n"; // empty = www.example.com (last name)
 
-  char *filename = create_test_file(zone_content);
-  munit_assert_not_null(filename);
+  char *fname = create_test_file(zone_content);
+  munit_assert_not_null(fname);
 
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 3);
@@ -294,7 +294,7 @@ static MunitResult test_relative_names(const MunitParameter params[], void *data
   munit_assert_not_null(www_aaaa);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
 
   return MUNIT_OK;
 }
@@ -310,17 +310,17 @@ static MunitResult test_blank_lines_and_whitespace(const MunitParameter params[]
     "mail.example.com. 300 IN A 192.168.1.2\n"
     "\n\n";
 
-  char *filename = create_test_file(zone_content);
+  char *fname = create_test_file(zone_content);
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  int load_result = zone_load_file(trie, filename, "example.com", &result);
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
 
   munit_assert_int(load_result, ==, 0);
   munit_assert_int(result.records_loaded, ==, 2);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
   return MUNIT_OK;
 }
 
@@ -332,11 +332,11 @@ static MunitResult test_ttl_inheritance(const MunitParameter params[], void *dat
     "www.example.com. IN A 192.168.1.1\n"  // should inherit 7200
     "mail.example.com. 1800 IN A 192.168.1.2\n";  // explicit 1800
 
-  char *filename = create_test_file(zone_content);
+  char *fname = create_test_file(zone_content);
   dns_trie_t *trie = dns_trie_create();
   zone_load_result_t result;
 
-  zone_load_file(trie, filename, "example.com", &result);
+  zone_load_file(trie, fname, "example.com", &result);
 
   dns_rrset_t *www = dns_trie_lookup(trie, "www.example.com", DNS_TYPE_A);
   munit_assert_int(www->records->ttl, ==, 7200);
@@ -345,7 +345,133 @@ static MunitResult test_ttl_inheritance(const MunitParameter params[], void *dat
   munit_assert_int(mail->records->ttl, ==, 1800);
 
   dns_trie_free(trie);
-  cleanup_test_file(filename);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_empty_file(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  char *fname = create_test_file("");
+  munit_assert_not_null(fname);
+
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
+  munit_assert_int(load_result, ==, -1);  // no records loaded
+  munit_assert_int(result.records_loaded, ==, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_only_comments(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *content =
+    "; foo\n"
+    "; bar\n"
+    "   ; baz\n";
+
+  char *fname = create_test_file(content);
+  munit_assert_not_null(fname);
+
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
+  munit_assert_int(load_result, ==, -1);
+  munit_assert_int(result.records_loaded, ==, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_invalid_ip(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *content = "test.example.com. 300 IN A 999.999.999.999\n";
+
+  char *fname = create_test_file(content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  zone_load_file(trie, fname, "example.com", &result);
+
+  // invalid IP - should fail
+  munit_assert_int(result.errors_encountered, >, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_missing_rdata(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *content = "test.example.com. 300 IN A\n";  // missing IP
+
+  char *fname = create_test_file(content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  zone_load_file(trie, fname, "example.com", &result);
+
+  // should fail
+  munit_assert_int(result.records_loaded, ==, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_unknown_type(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  const char *content = "test.example.com. 300 IN UNKNOWNTYPE somedata\n";
+
+  char *fname = create_test_file(content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  zone_load_file(trie, fname, "example.com", &result);
+
+  // should skip (unknown type)
+  munit_assert_int(result.records_loaded, ==, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
+  return MUNIT_OK;
+}
+
+static MunitResult test_multiline_soa(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // SOA spanning multiple lines
+  const char *content =
+    "$ORIGIN example.com.\n"
+    "@ IN SOA ns1.example.com. admin.example.com. (\n"
+    "    2024010101 ; serial\n"
+    "    7200       ; refresh\n"
+    "    3600       ; retry\n"
+    "    604800     ; expire\n"
+    "    86400      ; minimum\n"
+    ")\n";
+
+  char *fname = create_test_file(content);
+  dns_trie_t *trie = dns_trie_create();
+  zone_load_result_t result;
+
+  int load_result = zone_load_file(trie, fname, "example.com", &result);
+
+  // NOTE: current implementation may not support fully
+  munit_assert_int(load_result, ==, 0);
+
+  dns_trie_free(trie);
+  cleanup_test_file(fname);
   return MUNIT_OK;
 }
 
@@ -361,6 +487,12 @@ static MunitTest tests[] = {
   {"/relative_names", test_relative_names, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/blank_lines_and_whitespace", test_blank_lines_and_whitespace, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/ttl_inheritance", test_ttl_inheritance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/empty_file", test_empty_file, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/only_comments", test_only_comments, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/invalid_ip", test_invalid_ip, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/missing_rdata", test_missing_rdata, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/unknown_type", test_unknown_type, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/multiline_soa", test_multiline_soa, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 

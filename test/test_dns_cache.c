@@ -342,31 +342,6 @@ static MunitResult test_remove_entry(const MunitParameter params[], void *data) 
   return MUNIT_OK;
 }
 
-static MunitResult test_case_insensitive(const MunitParameter params[], void *data) {
-  (void)params; (void)data;
-
-  dns_cache_t *cache = dns_cache_create(10);
-  munit_assert_not_null(cache);
-
-  // insert with lowercase
-  dns_rr_t *record = dns_rr_create(DNS_TYPE_A, DNS_CLASS_IN, 300);
-  munit_assert_not_null(record);
-  record->rdata.a.address = inet_addr("192.168.1.1");
-
-  int result = dns_cache_insert(cache, "example.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 300);
-  munit_assert_int(result, ==, 0);
-  dns_rr_free(record);
-
-  // lookup with uppercase, should work
-  dns_cache_result_t *lookup = dns_cache_lookup(cache, "EXAMPLE.COM", DNS_TYPE_A, DNS_CLASS_IN);
-  munit_assert_not_null(lookup);
-  munit_assert_true(lookup->found);
-
-  dns_cache_result_free(lookup);
-  dns_cache_free(cache);
-  return MUNIT_OK;
-}
-
 static MunitResult test_hit_rate(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
@@ -761,6 +736,167 @@ static MunitResult test_cache_maintainer(const MunitParameter params[], void *da
   return MUNIT_OK;
 }
 
+static MunitResult test_zero_ttl(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+  munit_assert_not_null(cache);
+
+  dns_rr_t *record = dns_rr_create_a_str("192.168.1.1", 0);
+  munit_assert_not_null(record);
+
+  // zero TTL should be accepted but not be cached
+  int result = dns_cache_insert(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 0);
+  munit_assert_int(result, ==, 0);
+  munit_assert_size(cache->current_entries, ==, 0);
+
+  dns_rr_free(record);
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_min_ttl_clamping(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+  dns_cache_set_ttl_limits(cache, 60, 3600);  // min 60 seconds
+
+  dns_rr_t *record = dns_rr_create_a_str("192.168.1.1", 30); // 30 is below min
+  dns_cache_insert(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 30);
+
+  dns_cache_result_t *result = dns_cache_lookup(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN);
+  munit_assert_not_null(result);
+
+  // TTL should be at least min_ttl. allow 1 second wiggle room
+  munit_assert_uint32(result->remaining_ttl, >, 0);
+  munit_assert_uint32(result->remaining_ttl, >=, 59);
+
+  dns_cache_result_free(result);
+  dns_rr_free(record);
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_max_ttl_clamping(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+  dns_cache_set_ttl_limits(cache, 0, 3600);  // max 1 hour
+
+  dns_rr_t *record = dns_rr_create_a_str("192.168.1.1", 86400);  // 1 day is above max
+  dns_cache_insert(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 86400);
+
+  dns_cache_result_t *result = dns_cache_lookup(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN);
+  munit_assert_not_null(result);
+
+  // TTL should be at most max_ttl
+  munit_assert_uint32(result->remaining_ttl, >, 0);
+  munit_assert_uint32(result->remaining_ttl, <=, 3600);
+
+  dns_cache_result_free(result);
+  dns_rr_free(record);
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_update_existing(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+
+  dns_rr_t *record1 = dns_rr_create_a_str("192.168.1.1", 300);
+  dns_cache_insert(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN, record1, 1, 300);
+  dns_rr_free(record1);
+
+  // update with new record
+  dns_rr_t *record2 = dns_rr_create_a_str("192.168.1.2", 600);
+  dns_cache_insert(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN, record2, 1, 600);
+  dns_rr_free(record2);
+
+  // should still only have 1 entry
+  munit_assert_size(cache->current_entries, ==, 1);
+
+  // new entry should have a new IP
+  dns_cache_result_t *result = dns_cache_lookup(cache, "test.com", DNS_TYPE_A, DNS_CLASS_IN);
+  munit_assert_not_null(result);
+  munit_assert_uint32(result->records->rdata.a.address, ==, inet_addr("192.168.1.2"));
+
+  dns_cache_result_free(result);
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_negative_disabled(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+  dns_cache_set_negative_cache_enabled(cache, false);
+
+  int result = dns_cache_insert_negative(cache, "notfound.com", DNS_TYPE_A, DNS_CLASS_IN,
+                                         DNS_CACHE_TYPE_NXDOMAIN, DNS_RCODE_NXDOMAIN, 300);
+  // successfully stored nothing
+  munit_assert_int(result, ==, 0);
+  munit_assert_size(cache->current_entries, ==, 0);
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_lru_eviction_order(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(3);
+
+  dns_rr_t *r1 = dns_rr_create_a_str("1.1.1.1", 300);
+  dns_rr_t *r2 = dns_rr_create_a_str("2.2.2.2", 300);
+  dns_rr_t *r3 = dns_rr_create_a_str("3.3.3.3", 300);
+
+  dns_cache_insert(cache, "a.com", DNS_TYPE_A, DNS_CLASS_IN, r1, 1, 300);
+  dns_cache_insert(cache, "b.com", DNS_TYPE_A, DNS_CLASS_IN, r2, 1, 300);
+  dns_cache_insert(cache, "c.com", DNS_TYPE_A, DNS_CLASS_IN, r3, 1, 300);
+
+  dns_rr_free(r1);
+  dns_rr_free(r2);
+  dns_rr_free(r3);
+
+  // touch a.com to make it MRU
+  dns_cache_result_t *touch = dns_cache_lookup(cache, "a.com", DNS_TYPE_A, DNS_CLASS_IN);
+  dns_cache_result_free(touch);
+
+  // insert 4th entry - should evict b.com (LRU)
+  dns_rr_t *r4 = dns_rr_create_a_str("4.4.4.4", 300);
+  dns_cache_insert(cache, "d.com", DNS_TYPE_A, DNS_CLASS_IN, r4, 1, 300);
+  dns_rr_free(r4);
+
+  // a.com should still exist (was touched)
+  munit_assert_not_null(dns_cache_lookup(cache, "a.com", DNS_TYPE_A, DNS_CLASS_IN));
+  // b.com should be evicted
+  munit_assert_null(dns_cache_lookup(cache, "b.com", DNS_TYPE_A, DNS_CLASS_IN));
+  // c.com should still exist
+  munit_assert_not_null(dns_cache_lookup(cache, "c.com", DNS_TYPE_A, DNS_CLASS_IN));
+  // d.com should exist
+  munit_assert_not_null(dns_cache_lookup(cache, "d.com", DNS_TYPE_A, DNS_CLASS_IN));
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
+
+static MunitResult test_case_insensitive(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_cache_t *cache = dns_cache_create(10);
+
+  dns_rr_t *record = dns_rr_create_a_str("192.168.1.1", 300);
+  dns_cache_insert(cache, "Test.Example.COM", DNS_TYPE_A, DNS_CLASS_IN, record, 1, 300);
+  dns_rr_free(record);
+
+  munit_assert_not_null(dns_cache_lookup(cache, "test.example.com", DNS_TYPE_A, DNS_CLASS_IN));
+  munit_assert_not_null(dns_cache_lookup(cache, "TEST.EXAMPLE.COM", DNS_TYPE_A, DNS_CLASS_IN));
+  munit_assert_not_null(dns_cache_lookup(cache, "TeSt.ExAmPlE.cOm", DNS_TYPE_A, DNS_CLASS_IN));
+
+  dns_cache_free(cache);
+  return MUNIT_OK;
+}
 
 static MunitTest tests[] = {
   {"/operations/create", test_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -768,17 +904,23 @@ static MunitTest tests[] = {
   {"/operations/insert_positive", test_insert_positive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/operations/insert_negative", test_insert_negative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/operations/eviction", test_eviction, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/operations/ttl_clamping", test_ttl_clamping, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/operations/stats", test_stats, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/ttl_clamping", test_ttl_clamping, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/zero_ttl", test_zero_ttl, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/min_ttl_clamp", test_min_ttl_clamping, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/max_ttl_clamp", test_max_ttl_clamping, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/operations/update_existing", test_update_existing, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/hit", test_lookup_hit, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/miss", test_lookup_miss, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/negative_lookup", test_negative_lookup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/expiration", test_expiration, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/remove_expired", test_remove_expired, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/remove_entry", test_remove_entry, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/lookup/case_insensitive", test_case_insensitive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/hit_rate", test_hit_rate, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/lookup/multiple_records", test_multiple_records, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/negative_disabled", test_negative_disabled, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/lru_eviction", test_lru_eviction_order, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/lookup/case_insensitive", test_case_insensitive, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/resolver/create", test_resolver_with_cache_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/resolver/cache_hit", test_cache_hit_on_second_query, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/resolver/negative_caching", test_negative_caching, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},

@@ -601,7 +601,7 @@ static MunitResult test_label_too_long(const MunitParameter params[], void *data
 static MunitResult test_name_too_long(const MunitParameter params[], void *data) {
   (void)params; (void)data;
 
-  // build a packet with name > 255 chars (using multiple 63-char labels)
+  // build a packet with name >255 chars (using multiple 63-char labels)
   uint8_t long_name_packet[400];
   memset(long_name_packet, 0, sizeof(long_name_packet));
 

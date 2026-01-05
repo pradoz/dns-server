@@ -4,7 +4,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 
-static MunitResult test_resolution_result_create(const MunitParameter params[], void *data) {
+static MunitResult test_result_create(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -23,7 +23,7 @@ static MunitResult test_resolution_result_create(const MunitParameter params[], 
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_simple_a_record(const MunitParameter params[], void *data) {
+static MunitResult test_simple_a_record(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -57,7 +57,7 @@ static MunitResult test_resolve_simple_a_record(const MunitParameter params[], v
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_nxdomain(const MunitParameter params[], void *data) {
+static MunitResult test_nxdomain(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -83,7 +83,7 @@ static MunitResult test_resolve_nxdomain(const MunitParameter params[], void *da
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_nxdomain_with_soa(const MunitParameter params[], void *data) {
+static MunitResult test_nxdomain_with_soa(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -128,7 +128,7 @@ static MunitResult test_resolve_nxdomain_with_soa(const MunitParameter params[],
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_cname_simple(const MunitParameter params[], void *data) {
+static MunitResult test_cname_simple(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -173,7 +173,7 @@ static MunitResult test_resolve_cname_simple(const MunitParameter params[], void
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_cname_chain(const MunitParameter params[], void *data) {
+static MunitResult test_cname_chain(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -210,7 +210,7 @@ static MunitResult test_resolve_cname_chain(const MunitParameter params[], void 
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_cname_loop(const MunitParameter params[], void *data) {
+static MunitResult test_cname_loop(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -240,7 +240,7 @@ static MunitResult test_resolve_cname_loop(const MunitParameter params[], void *
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_cname_too_long(const MunitParameter params[], void *data) {
+static MunitResult test_cname_too_long(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -276,7 +276,7 @@ static MunitResult test_resolve_cname_too_long(const MunitParameter params[], vo
   return MUNIT_OK;
 }
 
-static MunitResult test_resolve_nodata(const MunitParameter params[], void *data) {
+static MunitResult test_nodata(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -325,17 +325,113 @@ static MunitResult test_error_codes(const MunitParameter params[], void *data) {
   return MUNIT_OK;
 }
 
+static MunitResult test_wildcard_not_implemented(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  // wildcard not yet implemented, just verify we do not crash
+  dns_trie_t *trie = dns_trie_create();
+
+  dns_trie_insert_a(trie, "*.example.com", "192.168.1.1", 300);
+
+  dns_question_t q = { .qtype = DNS_TYPE_A, .qclass = DNS_CLASS_IN };
+  dns_safe_strncpy(q.qname, "anything.example.com", sizeof(q.qname));
+
+  dns_resolution_result_t *result = dns_resolution_result_create();
+  dns_error_t err = DNS_ERROR_INIT;
+
+  dns_resolve_query_full(trie, &q, result, &err);
+
+  // return NXDOMAIN for now without wildcard expansion
+  munit_assert_int(result->rcode, ==, DNS_RCODE_NXDOMAIN);
+
+  dns_resolution_result_free(result);
+  dns_trie_free(trie);
+  return MUNIT_OK;
+}
+
+static MunitResult test_empty_qname(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_trie_t *trie = dns_trie_create();
+
+  dns_question_t q = { .qtype = DNS_TYPE_A, .qclass = DNS_CLASS_IN };
+  q.qname[0] = '\0';  // empty name
+
+  dns_resolution_result_t *result = dns_resolution_result_create();
+  dns_error_t err = DNS_ERROR_INIT;
+
+  int ret = dns_resolve_query_full(trie, &q, result, &err);
+  munit_assert_int(ret, ==, 0);  // should not crash
+
+  dns_resolution_result_free(result);
+  dns_trie_free(trie);
+  return MUNIT_OK;
+}
+
+static MunitResult test_invalid_class(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_trie_t *trie = dns_trie_create();
+  dns_trie_insert_a(trie, "test.com", "192.168.1.1", 300);
+
+  dns_question_t q = { .qtype = DNS_TYPE_A, .qclass = DNS_CLASS_CH };  // CHAOS class
+  dns_safe_strncpy(q.qname, "test.com", sizeof(q.qname));
+
+  dns_resolution_result_t *result = dns_resolution_result_create();
+  dns_error_t err = DNS_ERROR_INIT;
+
+  int ret = dns_resolve_query_full(trie, &q, result, &err);
+  munit_assert_int(ret, ==, -1);
+  munit_assert_int(result->rcode, ==, DNS_RCODE_FORMERROR);
+
+  dns_resolution_result_free(result);
+  dns_trie_free(trie);
+  return MUNIT_OK;
+}
+
+static MunitResult test_cname_to_nonexistent(const MunitParameter params[], void *data) {
+  (void)params; (void)data;
+
+  dns_trie_t *trie = dns_trie_create();
+
+  // CNAME pointing to non-existent target
+  dns_trie_insert_cname(trie, "alias.com", "nonexistent.com", 300);
+
+  dns_question_t q = { .qtype = DNS_TYPE_A, .qclass = DNS_CLASS_IN };
+  dns_safe_strncpy(q.qname, "alias.com", sizeof(q.qname));
+
+  dns_resolution_result_t *result = dns_resolution_result_create();
+  dns_error_t err = DNS_ERROR_INIT;
+
+  int ret = dns_resolve_query_full(trie, &q, result, &err);
+  munit_assert_int(ret, ==, 0);
+
+  // should return CNAME in answer, but no final A record
+  // RFC: NOERROR with just the CNAME
+  munit_assert_int(result->rcode, ==, DNS_RCODE_NOERROR);
+  munit_assert_int(result->answer_count, ==, 1);
+  munit_assert_int(result->answer_list->type, ==, DNS_TYPE_CNAME);
+
+  dns_resolution_result_free(result);
+  dns_trie_free(trie);
+  return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
-  {"/create_resolution_result", test_resolution_result_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/simple_a_record", test_resolve_simple_a_record, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/nxdomain", test_resolve_nxdomain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/nxdomain_with_soa", test_resolve_nxdomain_with_soa, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/cname_simple", test_resolve_cname_simple, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/cname_chain", test_resolve_cname_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/cname_loop", test_resolve_cname_loop, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/cname_too_long", test_resolve_cname_too_long, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/nodata", test_resolve_nodata, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/create_resolution_result", test_result_create, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/simple_a_record", test_simple_a_record, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/nxdomain", test_nxdomain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/nxdomain_with_soa", test_nxdomain_with_soa, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cname_simple", test_cname_simple, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cname_chain", test_cname_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cname_loop", test_cname_loop, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cname_too_long", test_cname_too_long, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/nodata", test_nodata, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/error_codes", test_error_codes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/wildcard_not_implemented", test_wildcard_not_implemented, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/empty_qname", test_empty_qname, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/invalid_class", test_invalid_class, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cname_to_nonexistent", test_cname_to_nonexistent, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 
